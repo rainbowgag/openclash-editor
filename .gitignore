@@ -1,0 +1,4 @@
+*.download
+*.tmp
+.DS_Store
+Thumbs.db

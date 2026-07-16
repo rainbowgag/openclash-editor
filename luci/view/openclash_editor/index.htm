@@ -1,0 +1,173 @@
+<%+header%>
+
+<style>
+.oce-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.oce-card{border:1px solid #d8dce6;border-radius:8px;padding:16px;margin:14px 0;background:#fff}.oce-card h3{margin-top:0}.oce-input{width:100%;box-sizing:border-box}.oce-table{width:100%;border-collapse:collapse}.oce-table th,.oce-table td{padding:8px;border-bottom:1px solid #e6e8ee;text-align:left;vertical-align:middle}.oce-table th{font-weight:600}.oce-muted{color:#667085;font-size:13px}.oce-status{margin:10px 0;padding:10px;border-radius:6px;display:none;white-space:pre-wrap}.oce-ok{display:block;background:#e8f7ed;color:#176b34}.oce-warn{display:block;background:#fff6dd;color:#805b00}.oce-error{display:block;background:#fdeaea;color:#9b1c1c}.oce-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px}.oce-code{font-family:monospace}.oce-danger{color:#b42318}.oce-scroll{max-height:380px;overflow:auto}@media(max-width:800px){.oce-grid{grid-template-columns:1fr}.oce-table{font-size:12px}}
+</style>
+
+<h2>OpenClash 节点与设备规则管理</h2>
+<div class="cbi-map-descr">批量导入节点链接，自动生成设备规则。所有改动先保存在浏览器草稿中，生成测试副本并确认后才会应用正式配置。</div>
+
+<div id="status" class="oce-status"></div>
+
+<div class="oce-card">
+	<h3>1. 批量添加节点</h3>
+	<div class="oce-grid">
+		<div>
+			<label for="links">节点链接（每行一条）　<span style="font-weight:normal"><input id="add_to_pr" type="checkbox"> 同时加入 pr.proxies 节点名称列表</span></label>
+			<textarea id="links" class="oce-input oce-code" rows="9" placeholder="vless://...&#10;vmess://...&#10;hysteria2://..."></textarea>
+		</div>
+		<div>
+			<p class="oce-muted">支持 VLESS、VMess、Hysteria2/Hy2。节点名称来自链接 # 后面的名称；同名节点会拒绝加入。</p>
+			<div class="oce-actions">
+				<button id="dialer_btn" class="btn cbi-button" type="button">添加前置代理</button>
+				<button id="import_btn" class="btn cbi-button cbi-button-action" type="button">转换、加入并生成第一组规则</button>
+				<button id="clear_links_btn" class="btn cbi-button" type="button">清空输入</button>
+			</div>
+			<p id="dialer_hint" class="oce-muted">前置代理未启用。启用后固定添加 <code>dialer-proxy: 中转</code>。</p>
+		</div>
+	</div>
+</div>
+
+<div class="oce-card">
+	<h3>2. 节点列表 <span id="node_count" class="oce-muted"></span></h3>
+	<details>
+		<summary>已添加的节点 <span id="existing_node_count" class="oce-muted"></span></summary>
+		<div class="oce-scroll">
+		<table class="oce-table">
+			<thead><tr><th>选择</th><th>名称</th><th>pr</th><th>协议</th><th>服务器</th><th>操作</th></tr></thead>
+			<tbody id="existing_nodes_body"></tbody>
+		</table>
+		</div>
+	</details>
+	<h4>本次新增节点 <span id="new_node_count" class="oce-muted"></span></h4>
+	<div class="oce-scroll">
+		<table class="oce-table">
+			<thead><tr><th><input id="select_all" type="checkbox" title="全选草稿中的全部节点"></th><th>名称</th><th>pr</th><th>协议</th><th>服务器</th><th>操作</th></tr></thead>
+			<tbody id="new_nodes_body"></tbody>
+		</table>
+	</div>
+	<div class="oce-actions">
+		<button id="add_rules_btn" class="btn cbi-button cbi-button-add" type="button">为所选节点再添加一组规则</button>
+		<span class="oce-muted">下一可用地址：<strong id="next_ip">读取中…</strong></span>
+	</div>
+</div>
+
+<div class="oce-card">
+	<h3>3. 设备规则 <span id="rule_count" class="oce-muted"></span></h3>
+	<div class="oce-actions" style="margin-bottom:14px">
+		<label>内网 IP <input id="manual_ip" class="oce-input" style="width:180px" type="text" placeholder="192.168.100.36"></label>
+		<label>节点名称 <input id="manual_node" class="oce-input" style="width:220px" type="text" placeholder="精确输入已有节点名称"></label>
+		<button id="manual_rule_btn" class="btn cbi-button cbi-button-add" type="button">添加规则</button>
+	</div>
+	<details>
+		<summary>已添加的规则 <span id="existing_rule_count" class="oce-muted"></span></summary>
+		<div class="oce-scroll">
+		<table class="oce-table">
+			<thead><tr><th>内网 IP</th><th>目标节点（可手动修改）</th><th>操作</th></tr></thead>
+			<tbody id="existing_rules_body"></tbody>
+		</table>
+		</div>
+	</details>
+	<h4>本次新增规则 <span id="new_rule_count" class="oce-muted"></span></h4>
+	<div class="oce-scroll">
+		<table class="oce-table">
+			<thead><tr><th>内网 IP</th><th>目标节点（可手动修改）</th><th>操作</th></tr></thead>
+			<tbody id="new_rules_body"></tbody>
+		</table>
+	</div>
+	<p class="oce-muted">这里只管理 SRC-IP-CIDR 设备规则；RULE-SET、MATCH 等基础规则不会被删除。</p>
+</div>
+
+<div class="oce-card">
+	<h3>4. 预览并应用</h3>
+	<div class="oce-actions">
+		<button id="preview_btn" class="btn cbi-button cbi-button-action" type="button">生成测试副本并预览</button>
+		<span class="oce-muted">不会自动重启 OpenClash</span>
+	</div>
+	<div id="result" style="display:none">
+		<h4>修改差异</h4>
+		<pre id="diff" class="oce-scroll" style="white-space:pre-wrap"></pre>
+		<details><summary>查看完整测试配置</summary><pre id="preview" class="oce-scroll" style="white-space:pre-wrap"></pre></details>
+		<div class="cbi-page-actions">
+			<button id="apply_btn" class="btn cbi-button cbi-button-apply" type="button" disabled>应用正式配置</button>
+		</div>
+	</div>
+</div>
+
+<script src="<%=resource%>/openclash-editor/converter.js"></script>
+<script type="text/javascript">
+(function() {
+	var stateUrl='<%=luci.dispatcher.build_url("admin", "services", "openclash", "visual-editor-state")%>';
+	var previewUrl='<%=luci.dispatcher.build_url("admin", "services", "openclash", "visual-editor-preview")%>';
+	var applyUrl='<%=luci.dispatcher.build_url("admin", "services", "openclash", "visual-editor-apply")%>';
+	var draft={nodes:[],rules:[],next_ip:2,network_prefix:'192.168.100'};
+	var selected={},existingNodes={},existingRules={},dialerEnabled=false,token='';
+	function el(id){return document.getElementById(id);}
+	function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+	function status(message,type){var box=el('status');box.textContent=message;box.className='oce-status '+(type==='ok'?'oce-ok':type==='warn'?'oce-warn':'oce-error');}
+	function clearStatus(){el('status').className='oce-status';}
+	function invalidatePreview(){token='';el('result').style.display='none';el('apply_btn').disabled=true;}
+	function post(url,data){return fetch(url,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:new URLSearchParams(data)}).then(function(r){return r.text().then(function(text){try{return JSON.parse(text);}catch(_){throw new Error('服务器返回异常（HTTP '+r.status+'）：\n'+text.slice(0,240));}});});}
+	function getJson(url){return fetch(url,{credentials:'same-origin'}).then(function(r){return r.text().then(function(text){try{return JSON.parse(text);}catch(_){throw new Error('读取接口返回异常（HTTP '+r.status+'）');}});});}
+	function ruleParts(rule){var p=String(rule).split(',');return{ip:p[1]||'',name:p[2]||'',suffix:p.slice(3)};}
+	function nodeExists(name){return draft.nodes.some(function(node){return node.name===name;});}
+	function nodeRow(node,index){return '<tr><td><input class="node-check" data-name="'+esc(node.name)+'" type="checkbox" '+(selected[node.name]?'checked':'')+'></td><td>'+esc(node.name)+'</td><td><input class="node-pr" data-index="'+index+'" type="checkbox" '+(node.in_pr?'checked':'')+' title="加入 pr.proxies"></td><td>'+esc(node.type||'')+'</td><td>'+esc(node.server||'')+(node.port?':'+esc(node.port):'')+'</td><td><button class="btn cbi-button oce-danger node-delete" data-index="'+index+'" type="button">删除</button></td></tr>';}
+	function ruleRow(rule,index){var p=ruleParts(rule);return '<tr><td>'+esc(p.ip)+'</td><td><input class="oce-input rule-target" data-index="'+index+'" value="'+esc(p.name)+'"><button class="btn cbi-button rule-update" data-index="'+index+'" type="button">修改</button></td><td><button class="btn cbi-button oce-danger rule-delete" data-index="'+index+'" type="button">删除</button></td></tr>';}
+	function render(){
+		var oldNodes=[],newNodes=[],oldRules=[],newRules=[];
+		draft.nodes.forEach(function(n,i){(existingNodes[n.name]?oldNodes:newNodes).push(nodeRow(n,i));});
+		draft.rules.forEach(function(r,i){(existingRules[r]?oldRules:newRules).push(ruleRow(r,i));});
+		el('node_count').textContent='（'+draft.nodes.length+' 个）';el('existing_node_count').textContent='（'+oldNodes.length+'）';el('new_node_count').textContent='（'+newNodes.length+'）';
+		el('rule_count').textContent='（'+draft.rules.length+' 条）';el('existing_rule_count').textContent='（'+oldRules.length+'）';el('new_rule_count').textContent='（'+newRules.length+'）';
+		el('existing_nodes_body').innerHTML=oldNodes.join('')||'<tr><td colspan="6" class="oce-muted">没有已应用节点</td></tr>';
+		el('new_nodes_body').innerHTML=newNodes.join('')||'<tr><td colspan="6" class="oce-muted">本次还没有新增节点</td></tr>';
+		el('existing_rules_body').innerHTML=oldRules.join('')||'<tr><td colspan="3" class="oce-muted">没有已应用设备规则</td></tr>';
+		el('new_rules_body').innerHTML=newRules.join('')||'<tr><td colspan="3" class="oce-muted">本次还没有新增规则</td></tr>';
+		el('next_ip').textContent=draft.next_ip<=254?draft.network_prefix+'.'+draft.next_ip:'地址已用完';
+		var checks=[].slice.call(document.querySelectorAll('.node-check'));el('select_all').checked=checks.length>0&&checks.every(function(c){return c.checked;});
+	}
+	function addRuleGroup(names){if(!names.length){status('请至少选择一个节点','warn');return false;}if(draft.next_ip+names.length-1>254){status('可用地址不足，本组需要 '+names.length+' 个地址','error');return false;}names.forEach(function(name){draft.rules.push('SRC-IP-CIDR,'+draft.network_prefix+'.'+draft.next_ip+'/32,'+name);draft.next_ip++;});return true;}
+	function addManualRule(){
+		var ip=el('manual_ip').value.trim(),name=el('manual_node').value.trim();
+		var match=ip.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+		if(!match||match.slice(1).some(function(v){return Number(v)>255;})){status('请输入有效的 IPv4 地址，例如：192.168.100.36','error');return;}
+		if(ip.indexOf(draft.network_prefix+'.')!==0){status('当前只允许 '+draft.network_prefix+'.0/24 网段的地址','error');return;}
+		var host=Number(match[4]);if(host<2||host>254){status('内网 IP 末位必须在 2 至 254 之间','error');return;}
+		if(!nodeExists(name)){status('节点名称不存在，请精确输入已有节点名称：'+name,'error');return;}
+		if(draft.rules.some(function(rule){return ruleParts(rule).ip===ip+'/32';})){status('该内网 IP 已经存在规则：'+ip,'error');return;}
+		draft.rules.push('SRC-IP-CIDR,'+ip+'/32,'+name);if(host>=draft.next_ip)draft.next_ip=host+1;invalidatePreview();render();el('manual_ip').value='';el('manual_node').value='';status('已添加规则：SRC-IP-CIDR,'+ip+'/32,'+name,'ok');
+	}
+	function importNodes(){
+		clearStatus();var converted=OpenClashConverter.convert(el('links').value,dialerEnabled?'中转':'');var known={};draft.nodes.forEach(function(n){known[n.name]=true;});var accepted=[],conflicts=[];
+		converted.nodes.forEach(function(node){if(known[node.name])conflicts.push(node.name);else{known[node.name]=true;accepted.push(node);}});
+		if(!accepted.length){status((converted.errors.concat(conflicts.map(function(n){return'同名节点已存在：'+n;}))).join('\n')||'没有可加入的节点','error');return;}
+		if(draft.next_ip+accepted.length-1>254){status('没有足够的内网地址生成第一组规则，未加入草稿','error');return;}
+		var addToPr=el('add_to_pr').checked;accepted.forEach(function(node){draft.nodes.push({name:String(node.name),type:String(node.type||''),server:String(node.server||''),port:node.port,in_pr:addToPr,data:node});});
+		selected={};accepted.forEach(function(node){selected[node.name]=true;});addRuleGroup(accepted.map(function(n){return n.name;}));invalidatePreview();render();
+		var messages=['成功加入 '+accepted.length+' 个节点并生成第一组规则'+(addToPr?'，已加入 pr.proxies':'，未加入 pr.proxies')];if(conflicts.length)messages.push('跳过同名节点：'+conflicts.join('、'));if(converted.errors.length)messages.push(converted.errors.join('\n'));status(messages.join('\n'),converted.errors.length||conflicts.length?'warn':'ok');
+	}
+	function deleteNode(index){
+		var node=draft.nodes[index];if(!node)return;var affected=draft.rules.filter(function(r){return ruleParts(r).name===node.name;}).length,replacement='';
+		if(affected){replacement=prompt('节点“'+node.name+'”被 '+affected+' 条规则引用。\n输入替代节点的完整名称可迁移规则；留空将删除这些规则；点击取消则不删除。','');if(replacement===null)return;replacement=replacement.trim();if(replacement&&replacement===node.name){status('替代节点不能是待删除节点本身','error');return;}if(replacement&&!nodeExists(replacement)){status('替代节点不存在，请精确输入已有节点名称：'+replacement,'error');return;}}
+		else if(!confirm('删除节点“'+node.name+'”？'))return;
+		if(replacement){draft.rules=draft.rules.map(function(rule){var p=ruleParts(rule);return p.name===node.name?['SRC-IP-CIDR',p.ip,replacement].concat(p.suffix).join(','):rule;});}else{draft.rules=draft.rules.filter(function(rule){return ruleParts(rule).name!==node.name;});}
+		draft.nodes.splice(index,1);delete selected[node.name];invalidatePreview();render();status(replacement?'已删除节点并将 '+affected+' 条规则迁移到“'+replacement+'”':'已删除节点及 '+affected+' 条关联规则','warn');
+	}
+	function updateRule(index,input){var name=input.value.trim();if(!nodeExists(name)){status('节点名称不存在，请精确输入已有节点名称：'+name,'error');return;}var p=ruleParts(draft.rules[index]);draft.rules[index]=['SRC-IP-CIDR',p.ip,name].concat(p.suffix).join(',');invalidatePreview();render();status('规则已改为使用节点“'+name+'”','ok');}
+	function tableChange(e){if(e.target.classList.contains('node-check')){selected[e.target.getAttribute('data-name')]=e.target.checked;render();}if(e.target.classList.contains('node-pr')){var i=Number(e.target.getAttribute('data-index'));if(draft.nodes[i]){draft.nodes[i].in_pr=e.target.checked;invalidatePreview();render();}}}
+	function tableClick(e){var index=Number(e.target.getAttribute('data-index'));if(e.target.classList.contains('node-delete'))deleteNode(index);if(e.target.classList.contains('rule-delete')){var rule=draft.rules[index];if(!rule||!confirm('确认删除这条规则？\n'+rule))return;draft.rules.splice(index,1);invalidatePreview();render();status('规则已从草稿删除，节点保留','warn');}if(e.target.classList.contains('rule-update')){var input=document.querySelector('.rule-target[data-index="'+index+'"]');if(input)updateRule(index,input);}}
+	function loadState(){getJson(stateUrl).then(function(r){if(!r.ok)throw new Error(r.error+(r.details?'\n'+r.details:''));draft.nodes=r.nodes||[];draft.rules=r.rules||[];draft.next_ip=Number(r.next_ip)||2;draft.network_prefix=r.network_prefix||'192.168.100';existingNodes={};existingRules={};draft.nodes.forEach(function(n){existingNodes[n.name]=true;});draft.rules.forEach(function(rule){existingRules[rule]=true;});selected={};invalidatePreview();render();status('已读取正式配置','ok');}).catch(function(e){status(e.message,'error');});}
+	el('dialer_btn').addEventListener('click',function(){dialerEnabled=!dialerEnabled;this.textContent=dialerEnabled?'已添加前置代理（中转）':'添加前置代理';this.className=dialerEnabled?'btn cbi-button cbi-button-positive':'btn cbi-button';el('dialer_hint').textContent=dialerEnabled?'新导入节点将添加 dialer-proxy: 中转':'前置代理未启用。启用后固定添加 dialer-proxy: 中转。';});
+	el('import_btn').addEventListener('click',importNodes);el('clear_links_btn').addEventListener('click',function(){el('links').value='';});
+	['existing_nodes_body','new_nodes_body'].forEach(function(id){el(id).addEventListener('change',tableChange);el(id).addEventListener('click',tableClick);});
+	['existing_rules_body','new_rules_body'].forEach(function(id){el(id).addEventListener('click',tableClick);});
+	el('select_all').addEventListener('change',function(){var checked=this.checked;draft.nodes.forEach(function(n){selected[n.name]=checked;});render();});
+	el('add_rules_btn').addEventListener('click',function(){var names=draft.nodes.filter(function(n){return selected[n.name];}).map(function(n){return n.name;});if(addRuleGroup(names)){invalidatePreview();render();status('已为所选 '+names.length+' 个节点添加一组规则','ok');}});
+	el('manual_rule_btn').addEventListener('click',addManualRule);
+	el('preview_btn').addEventListener('click',function(){var btn=this;btn.disabled=true;clearStatus();var payload={nodes:draft.nodes.map(function(n){return n.data;}),anchor_names:draft.nodes.filter(function(n){return n.in_pr;}).map(function(n){return n.name;}),rules:draft.rules,next_ip:draft.next_ip};post(previewUrl,{payload:JSON.stringify(payload)}).then(function(r){if(!r.ok)throw new Error(r.error+(r.details?'\n'+r.details:''));token=r.token;el('diff').textContent=r.diff||'文件内容没有变化';el('preview').textContent=r.preview;el('result').style.display='';el('apply_btn').disabled=false;status('测试副本生成成功','ok');}).catch(function(e){status(e.message,'error');}).then(function(){btn.disabled=false;});});
+	el('apply_btn').addEventListener('click',function(){if(!token)return;var btn=this;btn.disabled=true;post(applyUrl,{token:token}).then(function(r){if(!r.ok)throw new Error(r.error+(r.details?'\n'+r.details:''));token='';alert('应用成功！');status('应用成功！','ok');loadState();}).catch(function(e){status(e.message,'error');btn.disabled=false;});});
+	loadState();
+})();
+</script>
+
+<%+footer%>
