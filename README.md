@@ -8,7 +8,8 @@
 - 支持 VLESS Reality、TLS、WS、gRPC
 - 可选写入 `dialer-proxy: 中转`
 - 独立控制节点是否加入 `pr.proxies`
-- 自动按 `192.168.100.2/32` 起始生成设备规则
+- 自动检测 OpenWrt LAN 地址和 CIDR，并生成对应网段的设备规则
+- 支持手动覆盖规则网段和自动分配起始 IP
 - 手动输入内网 IP 和节点名称补充规则
 - 检查重复内网 IP、重复节点名称和无效节点引用
 - 读取并折叠显示已经应用的节点和规则
@@ -61,7 +62,8 @@ sh -c "$(wget -qO- https://raw.githubusercontent.com/rainbowgag/openclash-editor
 - 已安装 OpenClash，并存在 `/etc/openclash/config/config.yaml`
 - 带 Lua 兼容层的 LuCI
 - Ruby、Ruby YAML 和 Psych（OpenClash 通常已经安装）
-- 当前设备规则网段为 `192.168.100.0/24`，可用主机地址为 `.2` 至 `.254`
+- 默认通过 `ubus network.interface.lan` 检测网段，失败时回退到 UCI
+- 支持 `/1` 至 `/30` IPv4 网段，并自动跳过路由器自身地址和重复规则 IP
 
 ## 安全机制
 

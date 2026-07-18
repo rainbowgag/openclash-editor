@@ -6,7 +6,6 @@ SOURCE = "/etc/openclash/config/config.yaml"
 TEST = "/tmp/openclash-editor-preview.yaml"
 PENDING_STATE = "/tmp/openclash-editor-preview-state.json"
 STATE = "/etc/openclash/openclash-editor-state.json"
-NETWORK_PREFIX = "192.168.100"
 
 def json_generate(value)
   case value
@@ -88,21 +87,126 @@ rescue Errno::ENOENT, Psych::SyntaxError
   {}
 end
 
+def ipv4_to_i(address)
+  parts = address.to_s.split(".")
+  raise "无效 IPv4 地址：#{address}" unless parts.length == 4 && parts.all? { |part| part.match?(/\A\d{1,3}\z/) && part.to_i.between?(0, 255) }
+  parts.reduce(0) { |value, part| (value << 8) | part.to_i }
+end
+
+def i_to_ipv4(value)
+  [24, 16, 8, 0].map { |shift| (value >> shift) & 255 }.join(".")
+end
+
+def netmask_prefix(netmask)
+  bits = format("%032b", ipv4_to_i(netmask))
+  raise "无效子网掩码：#{netmask}" unless bits.match?(/\A1*0*\z/)
+  bits.count("1")
+end
+
+def cidr_info(cidr)
+  match = cidr.to_s.strip.match(/\A([^\/]+)\/(\d{1,2})\z/)
+  raise "无效网段：#{cidr}" unless match
+  address = ipv4_to_i(match[1])
+  prefix = match[2].to_i
+  raise "LAN 网段前缀必须在 /1 至 /30 之间" unless prefix.between?(1, 30)
+  mask = (0xffffffff << (32 - prefix)) & 0xffffffff
+  network = address & mask
+  broadcast = network | (~mask & 0xffffffff)
+  {
+    "cidr" => "#{i_to_ipv4(network)}/#{prefix}",
+    "prefix" => prefix,
+    "network_i" => network,
+    "broadcast_i" => broadcast,
+    "first_i" => network + 1,
+    "last_i" => broadcast - 1,
+    "first_host" => i_to_ipv4(network + 1),
+    "last_host" => i_to_ipv4(broadcast - 1)
+  }
+end
+
+def detect_lan
+  begin
+    raw = IO.popen(["ubus", "call", "network.interface.lan", "status"], &:read)
+    status = YAML.safe_load(raw, aliases: true) || {}
+    address = Array(status["ipv4-address"]).find { |item| item.is_a?(Hash) && item["address"] && item["mask"] }
+    if address
+      gateway = address["address"].to_s
+      info = cidr_info("#{gateway}/#{address['mask']}")
+      return info.merge("gateway" => gateway, "detected" => true, "source" => "ubus")
+    end
+  rescue StandardError
+    nil
+  end
+
+  ipaddr = `uci -q get network.lan.ipaddr 2>/dev/null`.strip
+  raise "无法从 ubus 或 UCI 检测 LAN 地址" if ipaddr.empty?
+  if ipaddr.include?("/")
+    gateway, prefix = ipaddr.split("/", 2)
+  else
+    gateway = ipaddr
+    netmask = `uci -q get network.lan.netmask 2>/dev/null`.strip
+    netmask = "255.255.255.0" if netmask.empty?
+    prefix = netmask_prefix(netmask)
+  end
+  cidr_info("#{gateway}/#{prefix}").merge("gateway" => gateway, "detected" => true, "source" => "uci")
+rescue StandardError => error
+  cidr_info("192.168.1.0/24").merge(
+    "gateway" => "",
+    "detected" => false,
+    "source" => "fallback",
+    "error" => error.message
+  )
+end
+
+def rule_parts(rule)
+  match = rule.to_s.match(/\ASRC-IP-CIDR,(\d{1,3}(?:\.\d{1,3}){3})\/32,([^,\r\n]+)(?:,no-resolve)?\z/)
+  return nil unless match
+  ipv4_to_i(match[1])
+  { "ip" => match[1], "name" => match[2] }
+rescue StandardError
+  nil
+end
+
 def device_rules(config)
   Array(config["rules"]).select { |rule| rule.to_s.start_with?("SRC-IP-CIDR,") }.map(&:to_s)
 end
 
-def next_ip_for(rules)
-  highest = rules.filter_map do |rule|
-    match = rule.match(/\ASRC-IP-CIDR,#{Regexp.escape(NETWORK_PREFIX)}\.(\d+)\/32,/)
-    match && match[1].to_i
-  end.max || 1
-  saved = read_state.fetch("next_ip", 2).to_i
-  [[highest + 1, saved, 2].max, 255].min
+def next_ip_for(rules, network, saved_state)
+  used = rules.filter_map do |rule|
+    parts = rule_parts(rule)
+    next unless parts
+    value = ipv4_to_i(parts["ip"])
+    value if value.between?(network["first_i"], network["last_i"])
+  end
+  start = network["first_i"]
+  gateway_i = ipv4_to_i(network["gateway"]) unless network["gateway"].to_s.empty?
+  start += 1 if gateway_i == start
+  candidates = [start, (used.max || start - 1) + 1]
+  if saved_state["network_cidr"].to_s == network["cidr"] && !saved_state["next_ip"].to_s.empty?
+    begin
+      saved_ip = ipv4_to_i(saved_state["next_ip"])
+      candidates << saved_ip if saved_ip.between?(network["first_i"], network["last_i"] + 1)
+    rescue StandardError
+      nil
+    end
+  end
+  candidate = candidates.max
+  candidate += 1 if gateway_i == candidate
+  candidate <= network["last_i"] ? i_to_ipv4(candidate) : ""
 end
 
 def state_response
   config = load_config
+  saved_state = read_state
+  detected_lan = detect_lan
+  manual_network = saved_state["manual_network"] == true
+  begin
+    active_network = manual_network ? cidr_info(saved_state.fetch("network_cidr")) : cidr_info(detected_lan["cidr"])
+  rescue StandardError
+    manual_network = false
+    active_network = cidr_info(detected_lan["cidr"])
+  end
+  active_network["gateway"] = detected_lan["gateway"] if active_network["cidr"] == detected_lan["cidr"]
   anchor_names = Array(config.dig("pr", "proxies")).map(&:to_s)
   nodes = Array(config["proxies"]).filter_map do |node|
     next unless node.is_a?(Hash) && node["name"]
@@ -122,8 +226,15 @@ def state_response
     "ok" => true,
     "nodes" => nodes,
     "rules" => rules,
-    "next_ip" => next_ip_for(rules),
-    "network_prefix" => NETWORK_PREFIX,
+    "next_ip" => next_ip_for(rules, active_network, saved_state),
+    "network_cidr" => active_network["cidr"],
+    "first_host" => active_network["first_host"],
+    "last_host" => active_network["last_host"],
+    "manual_network" => manual_network,
+    "detected_lan_cidr" => detected_lan["cidr"],
+    "gateway_ip" => detected_lan["gateway"],
+    "detection_source" => detected_lan["source"],
+    "detection_error" => detected_lan["error"],
     "source_path" => SOURCE
   }
 end
@@ -170,7 +281,13 @@ def preview_response(request_path)
   nodes = request.fetch("nodes")
   rules = request.fetch("rules")
   anchor_names = request.fetch("anchor_names")
-  next_ip = request.fetch("next_ip").to_i
+  network = cidr_info(request.fetch("network_cidr"))
+  next_ip = request.fetch("next_ip").to_s
+  manual_network = request["manual_network"] == true
+  unless next_ip.empty?
+    next_ip_i = ipv4_to_i(next_ip)
+    raise "下一地址不在规则网段内：#{next_ip}" unless next_ip_i.between?(network["first_i"], network["last_i"])
+  end
   raise "节点数据必须是数组" unless nodes.is_a?(Array)
   raise "规则数据必须是数组" unless rules.is_a?(Array)
   raise "pr 节点名称必须是数组" unless anchor_names.is_a?(Array)
@@ -192,14 +309,13 @@ def preview_response(request_path)
 
   seen_rule_ips = {}
   rules.each do |rule|
-    match = rule.to_s.match(/\ASRC-IP-CIDR,#{Regexp.escape(NETWORK_PREFIX)}\.(\d+)\/32,([^,\r\n]+)(?:,no-resolve)?\z/)
-    raise "设备规则格式错误：#{rule}" unless match
-    host = match[1].to_i
-    raise "设备规则 IP 超出范围：#{rule}" unless host.between?(2, 254)
-    full_ip = "#{NETWORK_PREFIX}.#{host}"
-    raise "内网 IP 重复：#{full_ip}" if seen_rule_ips[full_ip]
-    seen_rule_ips[full_ip] = true
-    raise "规则引用了不存在的节点：#{match[2]}" unless names.include?(match[2])
+    parts = rule_parts(rule)
+    raise "设备规则格式错误：#{rule}" unless parts
+    full_ip = parts["ip"]
+    full_ip_i = ipv4_to_i(full_ip)
+    raise "内网 IP 重复：#{i_to_ipv4(full_ip_i)}" if seen_rule_ips[full_ip_i]
+    seen_rule_ips[full_ip_i] = true
+    raise "规则引用了不存在的节点：#{parts['name']}" unless names.include?(parts["name"])
   end
 
   lines = File.read(SOURCE).gsub("\r\n", "\n").split("\n", -1)
@@ -210,18 +326,24 @@ def preview_response(request_path)
   parsed = YAML.safe_load(generated, aliases: true)
   raise "生成后的配置不是 YAML 映射" unless parsed.is_a?(Hash)
   File.write(TEST, generated)
-  File.write(PENDING_STATE, json_generate({ "next_ip" => next_ip, "network_prefix" => NETWORK_PREFIX }))
+  File.write(PENDING_STATE, json_generate({
+    "next_ip" => next_ip,
+    "network_cidr" => network["cidr"],
+    "manual_network" => manual_network
+  }))
   { "ok" => true, "node_count" => nodes.length, "rule_count" => rules.length }
 end
 
-begin
-  result = case ARGV[0]
-           when "state" then state_response
-           when "preview" then preview_response(ARGV.fetch(1))
-           else raise "未知操作"
-           end
-  puts json_generate(result)
-rescue StandardError => error
-  puts json_generate({ "ok" => false, "error" => error.message, "details" => error.backtrace&.first(5)&.join("\n") })
-  exit 1
+if __FILE__ == $PROGRAM_NAME
+  begin
+    result = case ARGV[0]
+             when "state" then state_response
+             when "preview" then preview_response(ARGV.fetch(1))
+             else raise "未知操作"
+             end
+    puts json_generate(result)
+  rescue StandardError => error
+    puts json_generate({ "ok" => false, "error" => error.message, "details" => error.backtrace&.first(5)&.join("\n") })
+    exit 1
+  end
 end
