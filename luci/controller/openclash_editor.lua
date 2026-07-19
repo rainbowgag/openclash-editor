@@ -156,11 +156,25 @@ function action_reset()
 	if not ok then reply(false, { error = "恢复初始配置失败", details = err }) end
 end
 
+local function version_is_newer(latest, current)
+	local latest_parts, current_parts = {}, {}
+	for part in tostring(latest):gmatch("%d+") do latest_parts[#latest_parts + 1] = tonumber(part) end
+	for part in tostring(current):gmatch("%d+") do current_parts[#current_parts + 1] = tonumber(part) end
+	local count = math.max(#latest_parts, #current_parts)
+	for index = 1, count do
+		local left = latest_parts[index] or 0
+		local right = current_parts[index] or 0
+		if left > right then return true end
+		if left < right then return false end
+	end
+	return false
+end
+
 function action_update_check()
 	local current = (fs.readfile(version_path) or "dev"):gsub("%s+$", "")
 	local latest = sys.exec("sh " .. shellquote(update_path) .. " check 2>/dev/null"):gsub("%s+$", "")
 	if latest == "" then return reply(false, { error = "无法连接 GitHub 检查版本", current = current }) end
-	reply(true, { current = current, latest = latest, available = current ~= latest })
+	reply(true, { current = current, latest = latest, available = version_is_newer(latest, current) })
 end
 
 function action_update()
