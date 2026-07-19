@@ -154,12 +154,67 @@
     return node;
   }
 
+  function decodeUserinfo(value) {
+    try { return decodeURIComponent(value || ''); }
+    catch (_) { return value || ''; }
+  }
+
+  function socksHostPort(value) {
+    var match = String(value || '').match(/^(\[[^\]]+\]|[^:\s]+):(\d{1,5})$/);
+    if (!match) throw new Error('SOCKS 服务器必须使用 IP:端口 格式');
+    var server = match[1];
+    if (server.charAt(0) === '[') server = server.slice(1, -1);
+    var port = Number(match[2]);
+    if (port < 1 || port > 65535) throw new Error('SOCKS 端口必须在 1 至 65535 之间');
+    return { server: decodeUserinfo(server), port: port };
+  }
+
+  function socksCredentials(value) {
+    var colon = String(value || '').indexOf(':');
+    if (colon <= 0 || colon === value.length - 1) throw new Error('SOCKS 用户名或密码不能为空');
+    return {
+      username: decodeUserinfo(value.slice(0, colon)),
+      password: decodeUserinfo(value.slice(colon + 1))
+    };
+  }
+
+  function parseSocks(link, dialer) {
+    var value = link.trim(), lower = value.toLowerCase();
+    var hp, credentials, name = '';
+    if (lower.indexOf('socks5://') === 0) {
+      var part = splitLink(value, 'socks5://');
+      var schemeAt = part.authority.lastIndexOf('@');
+      if (schemeAt <= 0) throw new Error('SOCKS5 链接缺少用户名、密码或服务器');
+      credentials = socksCredentials(part.authority.slice(0, schemeAt));
+      hp = socksHostPort(part.authority.slice(schemeAt + 1));
+      name = part.name;
+    } else if (value.indexOf('@') >= 0) {
+      var at = value.lastIndexOf('@');
+      if (at <= 0) throw new Error('SOCKS 格式错误');
+      credentials = socksCredentials(value.slice(0, at));
+      hp = socksHostPort(value.slice(at + 1));
+    } else {
+      var match = value.match(/^(\[[^\]]+\]|[^:\s]+):(\d{1,5}):([^:]+):(.+)$/);
+      if (!match) throw new Error('SOCKS 格式应为 IP:端口:用户名:密码');
+      hp = socksHostPort(match[1] + ':' + match[2]);
+      credentials = { username: decodeUserinfo(match[3]), password: decodeUserinfo(match[4]) };
+    }
+    var node = {
+      name: name || 'SOCKS5 ' + hp.server + ':' + hp.port,
+      type: 'socks5', server: hp.server, port: hp.port,
+      username: credentials.username, password: credentials.password, udp: true
+    };
+    if (dialer) node['dialer-proxy'] = dialer;
+    return node;
+  }
+
   function parse(link, dialer) {
     var lower = link.toLowerCase();
     if (lower.indexOf('vless://') === 0) return parseVless(link, dialer);
     if (lower.indexOf('vmess://') === 0) return parseVmess(link, dialer);
     if (lower.indexOf('hysteria2://') === 0 || lower.indexOf('hy2://') === 0) return parseHy2(link, dialer);
-    throw new Error('仅支持 vless://、vmess://、hysteria2:// 或 hy2://');
+    if (lower.indexOf('socks5://') === 0 || link.indexOf('@') >= 0 || /^(\[[^\]]+\]|[^:\s]+):\d{1,5}:[^:]+:.+$/.test(link)) return parseSocks(link, dialer);
+    throw new Error('不支持的节点格式');
   }
 
   function convert(text, dialer) {
