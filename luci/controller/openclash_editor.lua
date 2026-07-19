@@ -12,6 +12,8 @@ local token_path = "/tmp/openclash-editor-preview.sha256"
 local pending_state_path = "/tmp/openclash-editor-preview-state.json"
 local state_path = "/etc/openclash/openclash-editor-state.json"
 local backend_path = "/usr/share/openclash-editor/backend.rb"
+local update_path = "/usr/share/openclash-editor/update.sh"
+local version_path = "/usr/share/openclash-editor/VERSION"
 
 local function shellquote(value)
 	return "'" .. tostring(value):gsub("'", "'\\''") .. "'"
@@ -20,12 +22,19 @@ end
 function index()
 	if not fs.access(source_path) then return end
 	local page = entry({"admin", "services", "openclash", "visual-editor"},
-		template("openclash_editor/index"), _("Visual Editor"), 85)
+		template("openclash_editor/nodes"), _("Node Editor"), 85)
 	page.leaf = true
 	page.acl_depends = { "luci-app-openclash" }
+	local rules_page = entry({"admin", "services", "openclash", "visual-editor-rules"},
+		template("openclash_editor/rules"), _("Rule Editor"), 86)
+	rules_page.leaf = true
+	rules_page.acl_depends = { "luci-app-openclash" }
 	entry({"admin", "services", "openclash", "visual-editor-state"}, call("action_state")).leaf = true
 	entry({"admin", "services", "openclash", "visual-editor-preview"}, call("action_preview")).leaf = true
 	entry({"admin", "services", "openclash", "visual-editor-apply"}, call("action_apply")).leaf = true
+	entry({"admin", "services", "openclash", "visual-editor-reset"}, call("action_reset")).leaf = true
+	entry({"admin", "services", "openclash", "visual-editor-update-check"}, call("action_update_check")).leaf = true
+	entry({"admin", "services", "openclash", "visual-editor-update"}, call("action_update")).leaf = true
 end
 
 local function reply(ok, data)
@@ -33,6 +42,14 @@ local function reply(ok, data)
 	data.ok = ok
 	http.prepare_content("application/json")
 	http.write(json.stringify(data))
+end
+
+local function require_post()
+	if http.getenv("REQUEST_METHOD") ~= "POST" then
+		reply(false, { error = "该操作只接受 POST 请求" })
+		return false
+	end
+	return true
 end
 
 local function run_backend(command)
@@ -88,6 +105,7 @@ local function preview_impl()
 end
 
 function action_preview()
+	if not require_post() then return end
 	local ok, err = xpcall(preview_impl, debug.traceback)
 	if not ok then reply(false, { error = "后端执行异常", details = err }) end
 end
@@ -119,6 +137,38 @@ local function apply_impl()
 end
 
 function action_apply()
+	if not require_post() then return end
 	local ok, err = xpcall(apply_impl, debug.traceback)
 	if not ok then reply(false, { error = "后端执行异常", details = err }) end
+end
+
+local function reset_impl()
+	local result, err, details = run_backend("reset")
+	if not result then return reply(false, { error = err, details = details }) end
+	if not result.ok then return reply(false, result) end
+	fs.remove(token_path)
+	reply(true, { message = "已恢复无节点和设备规则的初始配置", backup = result.backup })
+end
+
+function action_reset()
+	if not require_post() then return end
+	local ok, err = xpcall(reset_impl, debug.traceback)
+	if not ok then reply(false, { error = "恢复初始配置失败", details = err }) end
+end
+
+function action_update_check()
+	local current = (fs.readfile(version_path) or "dev"):gsub("%s+$", "")
+	local latest = sys.exec("sh " .. shellquote(update_path) .. " check 2>/dev/null"):gsub("%s+$", "")
+	if latest == "" then return reply(false, { error = "无法连接 GitHub 检查版本", current = current }) end
+	reply(true, { current = current, latest = latest, available = current ~= latest })
+end
+
+function action_update()
+	if not require_post() then return end
+	local log_path = "/tmp/openclash-editor-update.log"
+	local status = sys.call("sh " .. shellquote(update_path) .. " update >" .. shellquote(log_path) .. " 2>&1")
+	local output = fs.readfile(log_path) or ""
+	if status ~= 0 then return reply(false, { error = "更新失败", details = output }) end
+	local version = (fs.readfile(version_path) or "unknown"):gsub("%s+$", "")
+	reply(true, { message = "更新成功", version = version, details = output })
 end

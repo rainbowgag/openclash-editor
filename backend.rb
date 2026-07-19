@@ -6,6 +6,7 @@ SOURCE = "/etc/openclash/config/config.yaml"
 TEST = "/tmp/openclash-editor-preview.yaml"
 PENDING_STATE = "/tmp/openclash-editor-preview-state.json"
 STATE = "/etc/openclash/openclash-editor-state.json"
+VERSION_FILE = "/usr/share/openclash-editor/VERSION"
 
 def json_generate(value)
   case value
@@ -67,8 +68,8 @@ end
 
 def ordered_node(node)
   output = ordered_hash(node, %w[
-    name type server port uuid password alterId cipher udp network flow tls
-    servername sni client-fingerprint alpn reality-opts ws-opts grpc-opts
+    name type server port uuid password alterId cipher udp tls network flow
+    servername sni client-fingerprint alpn reality-opts ws-opts http-opts grpc-opts
     tcp-opts skip-cert-verify obfs obfs-password dialer-proxy
   ])
   if output["reality-opts"].is_a?(Hash)
@@ -171,28 +172,24 @@ def device_rules(config)
   Array(config["rules"]).select { |rule| rule.to_s.start_with?("SRC-IP-CIDR,") }.map(&:to_s)
 end
 
-def next_ip_for(rules, network, saved_state)
+def first_available_ip(rules, network, start_ip)
   used = rules.filter_map do |rule|
     parts = rule_parts(rule)
     next unless parts
     value = ipv4_to_i(parts["ip"])
     value if value.between?(network["first_i"], network["last_i"])
-  end
-  start = network["first_i"]
+  end.to_h { |value| [value, true] }
   gateway_i = ipv4_to_i(network["gateway"]) unless network["gateway"].to_s.empty?
-  start += 1 if gateway_i == start
-  candidates = [start, (used.max || start - 1) + 1]
-  if saved_state["network_cidr"].to_s == network["cidr"] && !saved_state["next_ip"].to_s.empty?
-    begin
-      saved_ip = ipv4_to_i(saved_state["next_ip"])
-      candidates << saved_ip if saved_ip.between?(network["first_i"], network["last_i"] + 1)
-    rescue StandardError
-      nil
-    end
-  end
-  candidate = candidates.max
-  candidate += 1 if gateway_i == candidate
+  candidate = ipv4_to_i(start_ip)
+  candidate += 1 while candidate <= network["last_i"] && (used[candidate] || gateway_i == candidate)
   candidate <= network["last_i"] ? i_to_ipv4(candidate) : ""
+end
+
+def default_start_ip(network)
+  candidate = network["first_i"]
+  gateway_i = ipv4_to_i(network["gateway"]) unless network["gateway"].to_s.empty?
+  candidate += 1 if gateway_i == candidate
+  i_to_ipv4(candidate)
 end
 
 def state_response
@@ -207,6 +204,15 @@ def state_response
     active_network = cidr_info(detected_lan["cidr"])
   end
   active_network["gateway"] = detected_lan["gateway"] if active_network["cidr"] == detected_lan["cidr"]
+  start_ip = default_start_ip(active_network)
+  if saved_state["network_cidr"].to_s == active_network["cidr"] && !saved_state["start_ip"].to_s.empty?
+    begin
+      saved_start_i = ipv4_to_i(saved_state["start_ip"])
+      start_ip = i_to_ipv4(saved_start_i) if saved_start_i.between?(active_network["first_i"], active_network["last_i"])
+    rescue StandardError
+      nil
+    end
+  end
   anchor_names = Array(config.dig("pr", "proxies")).map(&:to_s)
   nodes = Array(config["proxies"]).filter_map do |node|
     next unless node.is_a?(Hash) && node["name"]
@@ -226,7 +232,8 @@ def state_response
     "ok" => true,
     "nodes" => nodes,
     "rules" => rules,
-    "next_ip" => next_ip_for(rules, active_network, saved_state),
+    "start_ip" => start_ip,
+    "next_ip" => first_available_ip(rules, active_network, start_ip),
     "network_cidr" => active_network["cidr"],
     "first_host" => active_network["first_host"],
     "last_host" => active_network["last_host"],
@@ -235,8 +242,31 @@ def state_response
     "gateway_ip" => detected_lan["gateway"],
     "detection_source" => detected_lan["source"],
     "detection_error" => detected_lan["error"],
+    "source_sha256" => `sha256sum #{SOURCE} 2>/dev/null`.split.first.to_s,
+    "version" => File.exist?(VERSION_FILE) ? File.read(VERSION_FILE).strip : "dev",
     "source_path" => SOURCE
   }
+end
+
+def reset_response
+  lines = File.read(SOURCE).gsub("\r\n", "\n").split("\n", -1)
+  replace_anchor_names(lines, [])
+  replace_nodes(lines, [])
+  replace_device_rules(lines, [])
+  generated = lines.join("\n")
+  parsed = YAML.safe_load(generated, aliases: true)
+  raise "恢复后的配置不是 YAML 映射" unless parsed.is_a?(Hash)
+
+  stamp = Time.now.strftime("%Y%m%d-%H%M%S")
+  backup = File.join(File.dirname(SOURCE), ".#{File.basename(SOURCE)}.before-reset-#{stamp}")
+  File.binwrite(backup, File.binread(SOURCE))
+  File.chmod(File.stat(SOURCE).mode & 0o777, backup)
+  staged = "#{SOURCE}.editor-reset"
+  File.write(staged, generated)
+  File.chmod(File.stat(SOURCE).mode & 0o777, staged)
+  File.rename(staged, SOURCE)
+  File.delete(STATE) if File.exist?(STATE)
+  { "ok" => true, "backup" => backup }
 end
 
 def replace_anchor_names(lines, names)
@@ -282,12 +312,10 @@ def preview_response(request_path)
   rules = request.fetch("rules")
   anchor_names = request.fetch("anchor_names")
   network = cidr_info(request.fetch("network_cidr"))
-  next_ip = request.fetch("next_ip").to_s
+  start_ip = request.fetch("start_ip").to_s
   manual_network = request["manual_network"] == true
-  unless next_ip.empty?
-    next_ip_i = ipv4_to_i(next_ip)
-    raise "下一地址不在规则网段内：#{next_ip}" unless next_ip_i.between?(network["first_i"], network["last_i"])
-  end
+  start_ip_i = ipv4_to_i(start_ip)
+  raise "自动分配起始 IP 不在规则网段内：#{start_ip}" unless start_ip_i.between?(network["first_i"], network["last_i"])
   raise "节点数据必须是数组" unless nodes.is_a?(Array)
   raise "规则数据必须是数组" unless rules.is_a?(Array)
   raise "pr 节点名称必须是数组" unless anchor_names.is_a?(Array)
@@ -298,6 +326,7 @@ def preview_response(request_path)
     raise "节点数据格式错误" unless node.is_a?(Hash)
     name = node["name"].to_s.strip
     raise "节点名称不能为空" if name.empty?
+    raise "节点名称不能包含逗号或换行：#{name.inspect}" if name.match?(/[,\r\n]/)
     name
   end
   duplicates = names.group_by(&:itself).select { |_name, list| list.length > 1 }.keys
@@ -327,7 +356,7 @@ def preview_response(request_path)
   raise "生成后的配置不是 YAML 映射" unless parsed.is_a?(Hash)
   File.write(TEST, generated)
   File.write(PENDING_STATE, json_generate({
-    "next_ip" => next_ip,
+    "start_ip" => i_to_ipv4(start_ip_i),
     "network_cidr" => network["cidr"],
     "manual_network" => manual_network
   }))
@@ -339,6 +368,7 @@ if __FILE__ == $PROGRAM_NAME
     result = case ARGV[0]
              when "state" then state_response
              when "preview" then preview_response(ARGV.fetch(1))
+             when "reset" then reset_response
              else raise "未知操作"
              end
     puts json_generate(result)

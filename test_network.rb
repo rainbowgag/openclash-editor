@@ -15,4 +15,13 @@ cases.each do |input, expected|
   abort "#{input}: expected #{expected.inspect}, got #{actual.inspect}" unless actual == expected
 end
 
-puts "NETWORK_CALCULATION_OK #{cases.length} cases"
+network = cidr_info("192.168.101.1/24").merge("gateway" => "192.168.101.1")
+rules = [
+  "SRC-IP-CIDR,192.168.101.2/32,node-1",
+  "SRC-IP-CIDR,192.168.101.4/32,node-2"
+]
+abort "allocation should choose first gap" unless first_available_ip(rules, network, "192.168.101.2") == "192.168.101.3"
+rules.delete_at(0)
+abort "deleted address should be reused" unless first_available_ip(rules, network, "192.168.101.2") == "192.168.101.2"
+
+puts "NETWORK_CALCULATION_OK #{cases.length} subnets, rule IP recycling OK"

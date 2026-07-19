@@ -13,13 +13,13 @@ request = {
   "nodes" => state.fetch("nodes").map { |node| node.fetch("data") },
   "anchor_names" => state.fetch("nodes").select { |node| node["in_pr"] }.map { |node| node.fetch("name") },
   "rules" => state.fetch("rules"),
-  "next_ip" => state.fetch("next_ip"),
+  "start_ip" => state.fetch("start_ip"),
   "network_cidr" => state.fetch("network_cidr"),
   "manual_network" => state.fetch("manual_network")
 }
 if ENV["TEST_NETWORK_CIDR"]
   request["network_cidr"] = ENV.fetch("TEST_NETWORK_CIDR")
-  request["next_ip"] = ENV.fetch("TEST_NEXT_IP")
+  request["start_ip"] = ENV.fetch("TEST_START_IP")
   request["manual_network"] = true
 end
 File.write(request_file, YAML.dump(request))
@@ -40,6 +40,7 @@ puts({
   "nodes" => state.fetch("nodes").length,
   "rules" => state.fetch("rules").length,
   "next_ip" => state.fetch("next_ip"),
+  "start_ip" => state.fetch("start_ip"),
   "network_cidr" => state.fetch("network_cidr"),
   "detected_lan_cidr" => state.fetch("detected_lan_cidr"),
   "pr_names" => generated_anchor_names.length,

@@ -5,7 +5,7 @@
 ## 功能
 
 - 批量转换 VLESS、VMess、Hysteria2/Hy2 节点链接
-- 支持 VLESS Reality、TLS、WS、gRPC
+- 支持 VLESS Reality、TLS、WS、gRPC，以及 VMess HTTP 伪装传输
 - 可选写入 `dialer-proxy: 中转`
 - 独立控制节点是否加入 `pr.proxies`
 - 自动检测 OpenWrt LAN 地址和 CIDR，并生成对应网段的设备规则
@@ -13,9 +13,14 @@
 - 手动输入内网 IP 和节点名称补充规则
 - 检查重复内网 IP、重复节点名称和无效节点引用
 - 读取并折叠显示已经应用的节点和规则
+- 节点管理、设备规则与预览应用分为两个独立页面
+- 可修改已添加节点的名称，并同步修改所有关联规则
 - 删除节点时删除关联规则，或手动输入替代节点迁移规则
 - 手动修改每条规则的目标节点
 - 删除规则前二次确认
+- 删除规则后自动复用释放的最小内网 IP
+- 一键恢复到无节点、无设备规则的初始配置（自动备份）
+- 自动检测 GitHub 新版本并在页面中一键更新
 - 先生成 `/tmp` 测试副本并显示差异，再备份和应用正式配置
 - 不自动重启 OpenClash
 
@@ -45,9 +50,9 @@ sh -c "$(uclient-fetch -qO- https://raw.githubusercontent.com/rainbowgag/opencla
 http://路由器IP/cgi-bin/luci/admin/services/openclash/visual-editor
 ```
 
-## 一键更新
+## 更新
 
-重新执行安装命令即可覆盖更新插件文件。正式 OpenClash 配置、编辑器状态和自动备份不会被删除。
+节点管理页面会自动检查版本，发现新版本时显示“立即更新”按钮。也可以重新执行安装命令覆盖更新插件文件。更新不会修改正式 OpenClash 配置、编辑器状态和自动备份。
 
 ## 一键卸载
 
@@ -78,6 +83,8 @@ sh -c "$(wget -qO- https://raw.githubusercontent.com/rainbowgag/openclash-editor
 ```text
 /etc/openclash/config/.config.yaml.editor-backup-YYYYMMDD-HHMMSS
 ```
+
+“恢复初始配置”也会先创建 `.config.yaml.before-reset-YYYYMMDD-HHMMSS` 备份；它只清空节点、`pr.proxies` 名称和 `SRC-IP-CIDR` 设备规则，保留其他 OpenClash 配置与基础规则。
 
 应用后不会自动重启 OpenClash，避免未经确认中断当前网络。
 

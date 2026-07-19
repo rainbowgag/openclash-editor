@@ -105,13 +105,15 @@
     var uuid = String(data.id || data.uuid || '').trim();
     if (!server || !uuid) throw new Error('缺少服务器或 UUID');
     var type = network(data.net || 'tcp');
+    var headerType = String(data.type || '').trim().toLowerCase();
+    if (headerType === 'http' && type === 'tcp') type = 'http';
     var node = {
       name: String(data.ps || data.name || server), type: 'vmess', server: server,
       port: Number(data.port) || 443, uuid: uuid, alterId: Number(data.aid) || 0,
       cipher: data.scy || data.cipher || 'auto', udp: true, network: type
     };
     var tls = String(data.tls || '').toLowerCase();
-    if (tls === 'tls' || tls === 'true' || tls === '1') node.tls = true;
+    node.tls = tls === 'tls' || tls === 'true' || tls === '1';
     var sni = String(data.sni || data.servername || '').trim();
     if (sni) node.servername = sni;
     var fp = String(data.fp || data.fingerprint || '').trim();
@@ -121,8 +123,11 @@
       node['ws-opts'] = { path: decode(data.path || '/') };
       if (data.host) node['ws-opts'].headers = { Host: String(data.host) };
     }
-    if (type === 'tcp' && data.type && data.type !== 'none') {
-      node['tcp-opts'] = { header: { type: data.type } };
+    if (type === 'http') {
+      node['http-opts'] = { method: 'GET', path: [decode(data.path || '/')] };
+      if (data.host) node['http-opts'].headers = { Host: String(data.host).split(',').map(function(v) { return v.trim(); }).filter(Boolean) };
+    } else if (type === 'tcp' && headerType && headerType !== 'none') {
+      node['tcp-opts'] = { header: { type: headerType } };
     }
     if (dialer) node['dialer-proxy'] = dialer;
     return node;
