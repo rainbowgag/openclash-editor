@@ -10,7 +10,7 @@
 
   <div class="oce-card oce-system">
     <h3>批量添加节点</h3>
-    <div class="oce-grid"><div><label for="links"><strong>节点链接（每行一条）</strong></label><textarea id="links" class="oce-input oce-code" rows="10" placeholder="vless://...&#10;vmess://...&#10;hysteria2://..."></textarea></div><div><p>支持 VLESS、VMess、Hysteria2/Hy2；VMess HTTP 伪装会转换为 <code>network: http</code> 和 <code>http-opts</code>。</p><label><input id="add_to_pr" type="checkbox"> 加入 <code>pr.proxies</code> 节点名称列表</label><div class="oce-actions" style="margin-top:16px"><button id="dialer_btn" class="btn cbi-button" type="button">添加前置代理</button><button id="import_btn" class="btn cbi-button cbi-button-action" type="button">转换并添加节点</button><button id="clear_btn" class="btn cbi-button" type="button">清空</button></div><p id="dialer_hint" class="oce-muted">前置代理未启用；启用后固定添加 <code>dialer-proxy: 中转</code>。</p></div></div>
+    <div class="oce-grid"><div><label for="links"><strong>节点链接（每行一条）</strong></label><textarea id="links" class="oce-input oce-code" rows="10" placeholder="vless://...&#10;vmess://...&#10;hysteria2://..."></textarea></div><div><p><strong>支持协议：</strong>VLESS、VMess、Hysteria2/Hy2</p><label class="oce-check-label"><input id="add_to_pr" class="oce-check" type="checkbox"> 加入节点名称列表</label><div class="oce-actions" style="margin-top:16px"><button id="dialer_btn" class="btn cbi-button" type="button">添加前置代理</button><button id="import_btn" class="btn cbi-button cbi-button-action" type="button">转换并添加节点</button><button id="clear_btn" class="btn cbi-button" type="button">清空</button></div><p id="dialer_hint" class="oce-muted">前置代理未启用；启用后固定添加 <code>dialer-proxy: 中转</code>。</p></div></div>
   </div>
 
   <div class="oce-card oce-user">
