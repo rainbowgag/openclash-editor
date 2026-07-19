@@ -9,6 +9,7 @@
 - 支持 VLESS Reality、TLS、WS、gRPC，以及 VMess HTTP 伪装传输
 - 可选写入 `dialer-proxy: 中转`
 - 独立控制节点是否加入 `pr.proxies`
+- 默认自动为新节点匹配设备规则，也可取消勾选只添加节点
 - 自动检测 OpenWrt LAN 地址和 CIDR，并生成对应网段的设备规则
 - 支持手动覆盖规则网段和自动分配起始 IP
 - 手动输入内网 IP 和节点名称补充规则
