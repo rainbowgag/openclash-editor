@@ -1,5 +1,5 @@
 <%+header%>
-<link rel="stylesheet" href="<%=resource%>/openclash-editor/editor.css?v=1.2.0">
+<link rel="stylesheet" href="<%=resource%>/openclash-editor/editor.css?v=1.3.0">
 <div class="oce-shell">
   <div class="oce-hero">
     <div><h2>OpenClash 可视编辑器</h2><p>节点管理 · 所有编辑先保存在浏览器草稿中</p></div>
@@ -14,14 +14,14 @@
   </div>
 
   <div class="oce-card oce-user">
-    <h3>节点列表 <span id="node_count" class="oce-badge"></span></h3>
-    <details><summary>已应用的节点 <span id="existing_count" class="oce-muted"></span></summary><div class="oce-scroll"><table class="oce-table"><thead><tr><th>名称</th><th>加入 pr</th><th>协议</th><th>服务器</th><th>操作</th></tr></thead><tbody id="existing_body"></tbody></table></div></details>
+    <div class="oce-actions" style="justify-content:space-between"><h3>节点列表 <span id="node_count" class="oce-badge"></span></h3><div class="oce-actions"><input id="node_search" class="oce-input" style="width:280px" type="search" placeholder="输入节点名称快速查找"><button id="node_search_clear" class="btn cbi-button" type="button">清空搜索</button></div></div>
+    <details id="existing_nodes_details"><summary>已应用的节点 <span id="existing_count" class="oce-muted"></span></summary><div class="oce-scroll"><table class="oce-table"><thead><tr><th>名称</th><th>加入 pr</th><th>协议</th><th>服务器</th><th>操作</th></tr></thead><tbody id="existing_body"></tbody></table></div></details>
     <h4>本次新增或修改</h4><div class="oce-scroll"><table class="oce-table"><thead><tr><th>名称</th><th>加入 pr</th><th>协议</th><th>服务器</th><th>操作</th></tr></thead><tbody id="new_body"></tbody></table></div>
     <div class="oce-actions" style="margin-top:14px"><a class="btn cbi-button cbi-button-action" href="<%=luci.dispatcher.build_url('admin','services','openclash','visual-editor-rules')%>">下一步：管理规则与应用 →</a></div>
   </div>
 </div>
-<script src="<%=resource%>/openclash-editor/converter.js?v=1.2.0"></script>
-<script src="<%=resource%>/openclash-editor/editor-common.js?v=1.2.0"></script>
+<script src="<%=resource%>/openclash-editor/converter.js?v=1.3.0"></script>
+<script src="<%=resource%>/openclash-editor/editor-common.js?v=1.3.0"></script>
 <script>
 (function(){
   var E=OpenClashEditor,draft,dialer=false;
@@ -30,7 +30,7 @@
   function exists(name){return draft.nodes.some(function(n){return n.name===name})}
   function nodeRow(n,i){return '<tr><td><strong>'+E.esc(n.name)+'</strong></td><td><input class="node-pr" data-i="'+i+'" type="checkbox" '+(n.in_pr?'checked':'')+'></td><td>'+E.esc(n.type)+'</td><td>'+E.esc(n.server)+(n.port?':'+E.esc(n.port):'')+'</td><td><button class="btn cbi-button rename" data-i="'+i+'" type="button">改名</button> <button class="btn cbi-button oce-danger delete" data-i="'+i+'" type="button">删除</button></td></tr>'}
   function changed(n){return draft.existing_node_names.indexOf(n.name)<0||n._edited}
-  function render(){var old=[],fresh=[];draft.nodes.forEach(function(n,i){(changed(n)?fresh:old).push(nodeRow(n,i))});el('node_count').textContent=draft.nodes.length+' 个';el('existing_count').textContent='（'+old.length+'）';el('existing_body').innerHTML=old.join('')||'<tr><td colspan="5" class="oce-empty">没有已应用节点</td></tr>';el('new_body').innerHTML=fresh.join('')||'<tr><td colspan="5" class="oce-empty">本次还没有新增或修改节点</td></tr>';E.saveDraft(draft)}
+  function render(){var old=[],fresh=[],query=(el('node_search').value||'').trim().toLowerCase();draft.nodes.forEach(function(n,i){if(query&&String(n.name).toLowerCase().indexOf(query)<0)return;(changed(n)?fresh:old).push(nodeRow(n,i))});var shown=old.length+fresh.length;el('node_count').textContent=query?'显示 '+shown+' / '+draft.nodes.length:draft.nodes.length+' 个';el('existing_count').textContent='（'+old.length+'）';el('existing_body').innerHTML=old.join('')||'<tr><td colspan="5" class="oce-empty">'+(query?'没有匹配的已应用节点':'没有已应用节点')+'</td></tr>';el('new_body').innerHTML=fresh.join('')||'<tr><td colspan="5" class="oce-empty">'+(query?'没有匹配的新增或修改节点':'本次还没有新增或修改节点')+'</td></tr>';if(query&&old.length)el('existing_nodes_details').open=true;E.saveDraft(draft)}
   function addRules(names){for(var i=0;i<names.length;i++){E.recalculateNextIp(draft);if(!draft.next_ip)throw new Error('当前网段没有足够的可用地址生成规则');draft.rules.push('SRC-IP-CIDR,'+draft.next_ip+'/32,'+names[i])}E.recalculateNextIp(draft)}
   function importNodes(){var out=OpenClashConverter.convert(el('links').value,dialer?'中转':'');var accepted=[],skipped=[];out.nodes.forEach(function(n){if(/[,\r\n]/.test(n.name))out.errors.push('节点名称不能包含逗号或换行：'+n.name);else if(exists(n.name)||accepted.some(function(x){return x.name===n.name}))skipped.push(n.name);else accepted.push(n)});if(!accepted.length){msg(out.errors.concat(skipped.map(function(x){return'同名节点已存在：'+x})).join('\n')||'没有可添加的节点','error');return}var autoRules=el('auto_rules').checked,snapshot=JSON.stringify(draft.rules);if(autoRules){try{addRules(accepted.map(function(n){return n.name}))}catch(e){draft.rules=JSON.parse(snapshot);msg(e.message,'error');return}}var inPr=el('add_to_pr').checked;accepted.forEach(function(n){draft.nodes.push({name:String(n.name),type:String(n.type||''),server:String(n.server||''),port:n.port,in_pr:inPr,data:n})});draft.selected_node_names=accepted.map(function(n){return n.name});render();var notes=[autoRules?'已添加 '+accepted.length+' 个节点，并自动生成第一组设备规则':'已添加 '+accepted.length+' 个节点，未自动生成设备规则'];if(skipped.length)notes.push('跳过同名节点：'+skipped.join('、'));if(out.errors.length)notes.push(out.errors.join('\n'));msg(notes.join('\n'),skipped.length||out.errors.length?'warn':'ok')}
   function renameNode(i){var n=draft.nodes[i],old=n&&n.name;if(!n)return;var name=prompt('请输入新的节点名称：',old);if(name===null)return;name=name.trim();if(!name||/[\r\n,]/.test(name)){msg('节点名称不能为空，也不能包含逗号或换行','error');return}if(name!==old&&exists(name)){msg('节点名称已存在：'+name,'error');return}n.name=name;n.data.name=name;n._edited=true;draft.rules=draft.rules.map(function(r){var p=E.ruleParts(r);return p.name===old?['SRC-IP-CIDR',p.ip,name].concat(p.suffix).join(','):r});draft.selected_node_names=(draft.selected_node_names||[]).map(function(x){return x===old?name:x});render();msg('节点已改名，引用该节点的规则也已同步修改','ok')}
@@ -39,7 +39,7 @@
   function checkUpdate(){E.get(urls.updateCheck).then(function(r){el('version').textContent='当前版本 '+(r.current||draft.version);if(r.ok&&r.available){el('update_btn').style.display='';el('update_btn').textContent='发现 '+r.latest+'，立即更新'}}).catch(function(){el('version').textContent='当前版本 '+draft.version})}
   el('update_btn').onclick=function(){if(!confirm('确认在线更新插件？正式 OpenClash 配置不会被修改。'))return;this.disabled=true;E.post(urls.update,{}).then(function(r){if(!r.ok)throw new Error(r.error+(r.details?'\n'+r.details:''));alert('插件已更新到 '+r.version+'，页面将刷新。');location.reload()}).catch(function(e){msg(e.message,'error');el('update_btn').disabled=false})};
   el('reset_btn').onclick=function(){if(!confirm('确认恢复初始配置？\n这会立即备份正式配置，然后清空全部节点、pr 节点名称和 SRC-IP-CIDR 设备规则；其他基础配置与规则会保留。'))return;this.disabled=true;E.post(urls.reset,{}).then(function(r){if(!r.ok)throw new Error(r.error+(r.details?'\n'+r.details:''));E.clearDraft();alert('已恢复初始配置。备份：'+r.backup);location.reload()}).catch(function(e){msg(e.message,'error');el('reset_btn').disabled=false})};
-  el('dialer_btn').onclick=function(){dialer=!dialer;this.textContent=dialer?'已添加前置代理（中转）':'添加前置代理';el('dialer_hint').innerHTML=dialer?'新导入节点会添加 <code>dialer-proxy: 中转</code>':'前置代理未启用；启用后固定添加 <code>dialer-proxy: 中转</code>。'};el('import_btn').onclick=importNodes;el('clear_btn').onclick=function(){el('links').value=''};el('existing_body').onclick=tableEvent;el('existing_body').onchange=tableEvent;el('new_body').onclick=tableEvent;el('new_body').onchange=tableEvent;
+  el('dialer_btn').onclick=function(){dialer=!dialer;this.textContent=dialer?'已添加前置代理（中转）':'添加前置代理';el('dialer_hint').innerHTML=dialer?'新导入节点会添加 <code>dialer-proxy: 中转</code>':'前置代理未启用；启用后固定添加 <code>dialer-proxy: 中转</code>。'};el('import_btn').onclick=importNodes;el('clear_btn').onclick=function(){el('links').value=''};el('node_search').oninput=render;el('node_search_clear').onclick=function(){el('node_search').value='';render();el('node_search').focus()};el('existing_body').onclick=tableEvent;el('existing_body').onchange=tableEvent;el('new_body').onclick=tableEvent;el('new_body').onchange=tableEvent;
   E.loadDraft().then(function(d){draft=d;render();msg('已读取正式配置；当前修改仅保存在浏览器草稿','ok');checkUpdate()}).catch(function(e){msg(e.message,'error')});
 })();
 </script>
