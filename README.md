@@ -8,7 +8,7 @@
 - SOCKS5 支持 `IP:端口:用户名:密码`、`socks5://用户名:密码@IP:端口`、`用户名:密码@IP:端口`
 - 支持 VLESS Reality、TLS、WS、gRPC，以及 VMess HTTP 伪装传输
 - 可选写入 `dialer-proxy: 中转`
-- 独立控制节点是否加入 `pr.proxies`
+- UI 将 `pr.proxies` 显示为“路由器代理节点”；列表为空时默认把新导入的首个节点加入其中
 - 默认自动为新节点匹配设备规则，也可取消勾选只添加节点
 - 自动检测 OpenWrt LAN 地址和 CIDR，并生成对应网段的设备规则
 - 支持手动覆盖规则网段和自动分配起始 IP
