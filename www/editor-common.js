@@ -52,6 +52,14 @@
     return {ip: parts[1] || '', name: parts[2] || '', suffix: parts.slice(3)};
   }
 
+  function numberNodes(nodes, prefix, start) {
+    var first = Number(start);
+    return nodes.map(function(node, index) {
+      node.name = String(prefix) + (first + index);
+      return node;
+    });
+  }
+
   function recalculateNextIp(draft) {
     var info = cidrInfo(draft.network_cidr), start = ipToInt(draft.start_ip);
     if (!info || start === null || start < info.first || start > info.last) { draft.next_ip = ''; return ''; }
@@ -128,6 +136,6 @@
     loadDraft: loadDraft, saveDraft: saveDraft, clearDraft: clearDraft,
     recalculateNextIp: recalculateNextIp,
     ipToInt: ipToInt, intToIp: intToIp, cidrInfo: cidrInfo,
-    ruleParts: ruleParts, esc: esc
+    ruleParts: ruleParts, numberNodes: numberNodes, esc: esc
   };
 })(window);

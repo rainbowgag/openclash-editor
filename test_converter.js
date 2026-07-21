@@ -4,6 +4,7 @@ const vm = require('vm');
 global.window = global;
 global.atob = value => Buffer.from(value, 'base64').toString('binary');
 vm.runInThisContext(fs.readFileSync('www/converter.js', 'utf8'));
+vm.runInThisContext(fs.readFileSync('www/editor-common.js', 'utf8'));
 
 const link = 'vmess://ewogICJ2IjogIjIiLAogICJwcyI6ICIyMjIuMTY3LjIzNS4xNDEiLAogICJhZGQiOiAiMjIyLjE2Ny4yMzUuMTQxIiwKICAicG9ydCI6IDEzOTk4LAogICJpZCI6ICI4NTBkMWRiZC0zMGM4LTQ2ODEtYmQ0ZC05MDcyN2Y1ZWJkZDEiLAogICJzY3kiOiAiYXV0byIsCiAgIm5ldCI6ICJ0Y3AiLAogICJ0bHMiOiAibm9uZSIsCiAgInR5cGUiOiAiaHR0cCIsCiAgInBhdGgiOiAiLyIKfQ==';
 const result = OpenClashConverter.convert(link, '');
@@ -35,3 +36,8 @@ socksResult.nodes.forEach((item, index) => {
   if (item['dialer-proxy'] !== '中转') throw new Error(`missing SOCKS5 dialer-proxy ${index + 1}`);
 });
 console.log(JSON.stringify(socksResult.nodes));
+
+const numbered = Array.from({length: 10}, (_, index) => ({name: `old-${index + 1}`}));
+OpenClashEditor.numberNodes(numbered, '美国', 5);
+if (numbered[0].name !== '美国5' || numbered[9].name !== '美国14') throw new Error('bulk node numbering failed');
+console.log(`${numbered[0].name}...${numbered[9].name}`);
