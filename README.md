@@ -33,6 +33,24 @@
 
 ## 一键安装
 
+### 中国大陆镜像（推荐）
+
+通过 VPS 镜像安装，安装完成后插件的版本检查和在线更新也会继续使用该镜像：
+
+```sh
+sh -c "$(uclient-fetch -qO- https://yy.yaml.uk:9443/openclash-editor/install.sh)"
+```
+
+如果固件没有 `uclient-fetch`：
+
+```sh
+sh -c "$(wget -qO- https://yy.yaml.uk:9443/openclash-editor/install.sh)"
+```
+
+镜像同时提供 `SHA256SUMS` 文件，可用于核对发布文件完整性。
+
+### GitHub 源
+
 通过 SSH 登录 OpenWrt 后，以 `root` 身份执行：
 
 ```sh

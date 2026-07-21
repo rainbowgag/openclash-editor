@@ -4,7 +4,9 @@ set -eu
 
 REPO="rainbowgag/openclash-editor"
 BRANCH="${OPENCLASH_EDITOR_BRANCH:-main}"
-BASE_URL="https://raw.githubusercontent.com/${REPO}/${BRANCH}"
+DEFAULT_BASE_URL="https://raw.githubusercontent.com/${REPO}/${BRANCH}"
+BASE_URL="${OPENCLASH_EDITOR_BASE_URL:-$DEFAULT_BASE_URL}"
+BASE_URL="${BASE_URL%/}"
 ARCHITECTURE="$(uname -m 2>/dev/null || echo unknown)"
 CONFIG_PATH="$(uci -q get openclash.config.config_path 2>/dev/null || true)"
 [ -n "$CONFIG_PATH" ] || CONFIG_PATH="/etc/openclash/config/config.yaml"
@@ -61,10 +63,12 @@ fetch_file "$BASE_URL/luci/view/openclash_editor/rules.htm" "/usr/lib/lua/luci/v
 fetch_file "$BASE_URL/www/converter.js" "/www/luci-static/resources/openclash-editor/converter.js"
 fetch_file "$BASE_URL/www/editor-common.js" "/www/luci-static/resources/openclash-editor/editor-common.js"
 fetch_file "$BASE_URL/www/editor.css" "/www/luci-static/resources/openclash-editor/editor.css"
+printf '%s\n' "$BASE_URL" > /usr/share/openclash-editor/SOURCE_URL
 
 chmod 755 /usr/share/openclash-editor/backend.rb
 chmod 755 /usr/share/openclash-editor/update.sh
 chmod 644 /usr/share/openclash-editor/VERSION
+chmod 644 /usr/share/openclash-editor/SOURCE_URL
 chmod 644 /usr/lib/lua/luci/controller/openclash_editor.lua
 chmod 644 /usr/lib/lua/luci/view/openclash_editor/nodes.htm
 chmod 644 /usr/lib/lua/luci/view/openclash_editor/rules.htm

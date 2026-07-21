@@ -4,7 +4,16 @@ set -eu
 
 REPO="rainbowgag/openclash-editor"
 BRANCH="${OPENCLASH_EDITOR_BRANCH:-main}"
-BASE_URL="https://raw.githubusercontent.com/${REPO}/${BRANCH}"
+DEFAULT_BASE_URL="https://raw.githubusercontent.com/${REPO}/${BRANCH}"
+SOURCE_URL_FILE="/usr/share/openclash-editor/SOURCE_URL"
+if [ -n "${OPENCLASH_EDITOR_BASE_URL:-}" ]; then
+  BASE_URL="$OPENCLASH_EDITOR_BASE_URL"
+elif [ -s "$SOURCE_URL_FILE" ]; then
+  BASE_URL="$(sed -n '1p' "$SOURCE_URL_FILE")"
+else
+  BASE_URL="$DEFAULT_BASE_URL"
+fi
+BASE_URL="${BASE_URL%/}"
 
 fetch_stdout() {
   if command -v uclient-fetch >/dev/null 2>&1; then
@@ -27,7 +36,7 @@ case "${1:-check}" in
     temporary="/tmp/openclash-editor-install.sh"
     fetch_stdout "$BASE_URL/install.sh" > "$temporary"
     chmod 700 "$temporary"
-    OPENCLASH_EDITOR_BRANCH="$BRANCH" sh "$temporary"
+    OPENCLASH_EDITOR_BRANCH="$BRANCH" OPENCLASH_EDITOR_BASE_URL="$BASE_URL" sh "$temporary"
     ;;
   *)
     echo "用法：$0 check|update" >&2
