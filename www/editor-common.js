@@ -87,6 +87,7 @@
       start_ip: state.start_ip,
       next_ip: state.next_ip || '',
       version: state.version || 'dev',
+      architecture: state.architecture || 'unknown',
       detection_source: state.detection_source,
       detection_error: state.detection_error
     };
@@ -108,6 +109,7 @@
       try { stored = JSON.parse(sessionStorage.getItem(STORAGE_KEY) || 'null'); } catch (_) { stored = null; }
       if (stored && stored.schema === 2 && stored.source_sha256 === state.source_sha256) {
         stored.version = state.version || stored.version;
+        stored.architecture = state.architecture || stored.architecture || 'unknown';
         stored.detected_lan_cidr = state.detected_lan_cidr;
         stored.gateway_ip = state.gateway_ip || '';
         stored.detection_source = state.detection_source;

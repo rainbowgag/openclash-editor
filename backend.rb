@@ -172,6 +172,43 @@ def device_rules(config)
   Array(config["rules"]).select { |rule| rule.to_s.start_with?("SRC-IP-CIDR,") }.map(&:to_s)
 end
 
+def system_architecture
+  architecture = `uname -m 2>/dev/null`.strip
+  architecture.empty? ? "unknown" : architecture
+end
+
+def change_summary(config, nodes, rules, anchor_names)
+  current_nodes = Array(config["proxies"]).select { |node| node.is_a?(Hash) && node["name"] }
+  before_by_name = current_nodes.to_h { |node| [node["name"].to_s, ordered_node(node)] }
+  after_by_name = nodes.to_h { |node| [node["name"].to_s, ordered_node(node)] }
+  added_nodes = after_by_name.keys - before_by_name.keys
+  removed_nodes = before_by_name.keys - after_by_name.keys
+  modified_nodes = (before_by_name.keys & after_by_name.keys).select do |name|
+    before_by_name[name] != after_by_name[name]
+  end
+
+  current_anchors = Array(config.dig("pr", "proxies")).map(&:to_s)
+  requested_anchors = anchor_names.map(&:to_s)
+  current_rules = device_rules(config)
+  requested_rules = rules.map(&:to_s)
+  added_rules = requested_rules - current_rules
+  removed_rules = current_rules - requested_rules
+
+  lines = ["节点：新增 #{added_nodes.length}，删除 #{removed_nodes.length}，修改 #{modified_nodes.length}"]
+  added_nodes.each { |name| lines << "  + #{name}" }
+  removed_nodes.each { |name| lines << "  - #{name}" }
+  modified_nodes.each { |name| lines << "  ~ #{name}" }
+  if current_anchors != requested_anchors
+    lines << "路由器代理节点："
+    lines << "  - #{current_anchors.empty? ? '（空）' : current_anchors.join('、')}"
+    lines << "  + #{requested_anchors.empty? ? '（空）' : requested_anchors.join('、')}"
+  end
+  lines << "设备规则：新增 #{added_rules.length}，删除 #{removed_rules.length}"
+  added_rules.each { |rule| lines << "  + #{rule}" }
+  removed_rules.each { |rule| lines << "  - #{rule}" }
+  lines.join("\n")
+end
+
 def first_available_ip(rules, network, start_ip)
   used = rules.filter_map do |rule|
     parts = rule_parts(rule)
@@ -242,6 +279,7 @@ def state_response
     "gateway_ip" => detected_lan["gateway"],
     "detection_source" => detected_lan["source"],
     "detection_error" => detected_lan["error"],
+    "architecture" => system_architecture,
     "source_sha256" => `sha256sum #{SOURCE} 2>/dev/null`.split.first.to_s,
     "version" => File.exist?(VERSION_FILE) ? File.read(VERSION_FILE).strip : "dev",
     "source_path" => SOURCE
@@ -347,6 +385,8 @@ def preview_response(request_path)
     raise "规则引用了不存在的节点：#{parts['name']}" unless names.include?(parts["name"])
   end
 
+  current_config = load_config
+  diff = change_summary(current_config, nodes, rules, anchor_names)
   lines = File.read(SOURCE).gsub("\r\n", "\n").split("\n", -1)
   replace_anchor_names(lines, anchor_names)
   replace_nodes(lines, nodes)
@@ -360,7 +400,7 @@ def preview_response(request_path)
     "network_cidr" => network["cidr"],
     "manual_network" => manual_network
   }))
-  { "ok" => true, "node_count" => nodes.length, "rule_count" => rules.length }
+  { "ok" => true, "node_count" => nodes.length, "rule_count" => rules.length, "diff" => diff }
 end
 
 if __FILE__ == $PROGRAM_NAME

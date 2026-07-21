@@ -93,11 +93,10 @@ local function preview_impl()
 	local token = sys.exec("sha256sum " .. shellquote(test_path) .. " | cut -d' ' -f1"):gsub("%s+$", "")
 	fs.writefile(token_path, token)
 	local generated = fs.readfile(test_path) or ""
-	local diff = sys.exec("diff -u " .. shellquote(source_path) .. " " .. shellquote(test_path) .. " 2>/dev/null")
 	reply(true, {
 		token = token,
 		preview = generated,
-		diff = diff,
+		diff = result.diff or "",
 		test_path = test_path,
 		node_count = result.node_count,
 		rule_count = result.rule_count
