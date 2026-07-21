@@ -4,23 +4,36 @@ local http = require "luci.http"
 local json = require "luci.jsonc"
 local fs = require "nixio.fs"
 local sys = require "luci.sys"
+local uci_model = require "luci.model.uci"
 
-local source_path = "/etc/openclash/config/config.yaml"
 local test_path = "/tmp/openclash-editor-preview.yaml"
 local request_path = "/tmp/openclash-editor-request.json"
 local token_path = "/tmp/openclash-editor-preview.sha256"
+local preview_source_path = "/tmp/openclash-editor-preview-source"
 local pending_state_path = "/tmp/openclash-editor-preview-state.json"
 local state_path = "/etc/openclash/openclash-editor-state.json"
 local backend_path = "/usr/share/openclash-editor/backend.rb"
 local update_path = "/usr/share/openclash-editor/update.sh"
 local version_path = "/usr/share/openclash-editor/VERSION"
 
+local function get_source_path()
+	local configured = uci_model.cursor():get("openclash", "config", "config_path")
+	if not configured or configured == "" then return "/etc/openclash/config/config.yaml" end
+	return configured
+end
+
+local function backup_path(source, suffix)
+	local directory = source:match("^(.*)/[^/]+$") or "."
+	local basename = source:match("([^/]+)$") or "config.yaml"
+	return directory .. "/." .. basename .. suffix
+end
+
 local function shellquote(value)
 	return "'" .. tostring(value):gsub("'", "'\\''") .. "'"
 end
 
 function index()
-	if not fs.access(source_path) then return end
+	if not fs.access(get_source_path()) then return end
 	local page = entry({"admin", "services", "openclash", "visual-editor"},
 		template("openclash_editor/nodes"), _("Node Editor"), 85)
 	page.leaf = true
@@ -92,6 +105,7 @@ local function preview_impl()
 	if not valid then return reply(false, { error = "YAML 校验失败", details = validation }) end
 	local token = sys.exec("sha256sum " .. shellquote(test_path) .. " | cut -d' ' -f1"):gsub("%s+$", "")
 	fs.writefile(token_path, token)
+	fs.writefile(preview_source_path, result.source_path or get_source_path())
 	local generated = fs.readfile(test_path) or ""
 	reply(true, {
 		token = token,
@@ -110,16 +124,21 @@ function action_preview()
 end
 
 local function apply_impl()
+	local source_path = get_source_path()
 	local requested = http.formvalue("token") or ""
 	local expected = (fs.readfile(token_path) or ""):gsub("%s+$", "")
 	local actual = sys.exec("sha256sum " .. shellquote(test_path) .. " 2>/dev/null | cut -d' ' -f1"):gsub("%s+$", "")
+	local preview_source = (fs.readfile(preview_source_path) or ""):gsub("%s+$", "")
 	if requested == "" or requested ~= expected or requested ~= actual then
 		return reply(false, { error = "预览已失效，请重新生成预览" })
+	end
+	if preview_source == "" or preview_source ~= source_path then
+		return reply(false, { error = "OpenClash 当前配置文件已切换，请重新生成预览" })
 	end
 	local valid, validation = validate_yaml(test_path)
 	if not valid then return reply(false, { error = "应用前校验失败", details = validation }) end
 	local stamp = os.date("%Y%m%d-%H%M%S")
-	local backup = "/etc/openclash/config/.config.yaml.editor-backup-" .. stamp
+	local backup = backup_path(source_path, ".editor-backup-" .. stamp)
 	if sys.call("cp -p " .. shellquote(source_path) .. " " .. shellquote(backup)) ~= 0 then
 		return reply(false, { error = "创建备份失败" })
 	end
@@ -132,6 +151,7 @@ local function apply_impl()
 		sys.call("cp " .. shellquote(pending_state_path) .. " " .. shellquote(state_path))
 	end
 	fs.remove(token_path)
+	fs.remove(preview_source_path)
 	reply(true, { message = "配置已应用，但尚未重启 OpenClash", backup = backup })
 end
 
@@ -146,6 +166,7 @@ local function reset_impl()
 	if not result then return reply(false, { error = err, details = details }) end
 	if not result.ok then return reply(false, result) end
 	fs.remove(token_path)
+	fs.remove(preview_source_path)
 	reply(true, { message = "已恢复无节点和设备规则的初始配置", backup = result.backup })
 end
 

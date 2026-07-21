@@ -2,7 +2,17 @@
 
 require "yaml"
 
-SOURCE = "/etc/openclash/config/config.yaml"
+DEFAULT_SOURCE = "/etc/openclash/config/config.yaml"
+
+def configured_source
+  override = ENV["OPENCLASH_CONFIG_PATH"].to_s.strip
+  return override unless override.empty?
+
+  configured = `uci -q get openclash.config.config_path 2>/dev/null`.strip
+  configured.empty? ? DEFAULT_SOURCE : configured
+end
+
+SOURCE = configured_source
 TEST = "/tmp/openclash-editor-preview.yaml"
 PENDING_STATE = "/tmp/openclash-editor-preview-state.json"
 STATE = "/etc/openclash/openclash-editor-state.json"
@@ -400,7 +410,7 @@ def preview_response(request_path)
     "network_cidr" => network["cidr"],
     "manual_network" => manual_network
   }))
-  { "ok" => true, "node_count" => nodes.length, "rule_count" => rules.length, "diff" => diff }
+  { "ok" => true, "node_count" => nodes.length, "rule_count" => rules.length, "diff" => diff, "source_path" => SOURCE }
 end
 
 if __FILE__ == $PROGRAM_NAME

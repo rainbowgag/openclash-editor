@@ -3,11 +3,11 @@
 require "yaml"
 
 backend = ARGV.fetch(0, "/usr/share/openclash-editor/backend.rb")
-source = "/etc/openclash/config/config.yaml"
 request_path = "/tmp/openclash-editor-socks-request.yaml"
 state_output = IO.popen(["ruby", backend, "state"], &:read)
 state = YAML.safe_load(state_output, aliases: true)
 abort state.fetch("error", "state failed") unless state["ok"]
+source = state.fetch("source_path")
 
 socks = {
   "name" => "SOCKS5 203.0.113.10:1080",

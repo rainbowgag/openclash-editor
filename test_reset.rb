@@ -3,7 +3,7 @@
 require "yaml"
 require_relative "backend"
 
-original = "/etc/openclash/config/config.yaml"
+original = SOURCE
 test_source = "/tmp/openclash-editor-reset-source.yaml"
 test_state = "/tmp/openclash-editor-reset-state.yaml"
 File.binwrite(test_source, File.binread(original))

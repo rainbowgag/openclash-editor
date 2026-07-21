@@ -6,6 +6,8 @@ REPO="rainbowgag/openclash-editor"
 BRANCH="${OPENCLASH_EDITOR_BRANCH:-main}"
 BASE_URL="https://raw.githubusercontent.com/${REPO}/${BRANCH}"
 ARCHITECTURE="$(uname -m 2>/dev/null || echo unknown)"
+CONFIG_PATH="$(uci -q get openclash.config.config_path 2>/dev/null || true)"
+[ -n "$CONFIG_PATH" ] || CONFIG_PATH="/etc/openclash/config/config.yaml"
 
 if [ "$(id -u)" != "0" ]; then
   echo "错误：请使用 root 用户运行安装命令。" >&2
@@ -17,8 +19,8 @@ if [ ! -x /usr/bin/ruby ] || ! ruby -ryaml -e 'exit 0' >/dev/null 2>&1; then
   exit 1
 fi
 
-if [ ! -f /etc/openclash/config/config.yaml ]; then
-  echo "错误：未找到 /etc/openclash/config/config.yaml，请先安装并配置 OpenClash。" >&2
+if [ ! -f "$CONFIG_PATH" ]; then
+  echo "错误：未找到 OpenClash 当前配置：$CONFIG_PATH，请先安装并配置 OpenClash。" >&2
   exit 1
 fi
 
@@ -48,6 +50,7 @@ fetch_file() {
 }
 
 echo "正在安装 OpenClash Visual Editor（系统架构：${ARCHITECTURE}）..."
+echo "OpenClash 当前配置：${CONFIG_PATH}"
 
 fetch_file "$BASE_URL/backend.rb" "/usr/share/openclash-editor/backend.rb"
 fetch_file "$BASE_URL/VERSION" "/usr/share/openclash-editor/VERSION"
