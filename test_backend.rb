@@ -10,6 +10,8 @@ preview_result = "/tmp/openclash-editor-test-preview-result.json"
 abort "state failed" unless system("ruby", backend, "state", out: state_file)
 state = YAML.safe_load(File.read(state_file), aliases: true)
 abort "architecture missing" if state["architecture"].to_s.empty?
+configured_source = `uci -q get openclash.config.config_path 2>/dev/null`.strip
+abort "configured source path not detected" unless configured_source.empty? || state["source_path"] == configured_source
 request = {
   "nodes" => state.fetch("nodes").map { |node| node.fetch("data") },
   "anchor_names" => state.fetch("nodes").select { |node| node["in_pr"] }.map { |node| node.fetch("name") },
@@ -28,6 +30,7 @@ abort "preview failed" unless system("ruby", backend, "preview", request_file, o
 preview = YAML.safe_load(File.read(preview_result), aliases: true)
 abort preview.fetch("error", "preview error") unless preview["ok"]
 abort "change summary missing" unless preview["diff"].is_a?(String) && preview["diff"].include?("节点：")
+abort "preview source path mismatch" unless preview["source_path"] == state["source_path"]
 generated = YAML.load_file("/tmp/openclash-editor-preview.yaml", aliases: true)
 generated_nodes = Array(generated["proxies"])
 generated_anchor_names = Array(generated.dig("pr", "proxies")).map(&:to_s)

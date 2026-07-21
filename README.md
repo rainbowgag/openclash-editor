@@ -1,6 +1,6 @@
 # OpenClash Visual Editor
 
-一个运行在 OpenWrt LuCI 中的 OpenClash 配置可视化编辑器，用于批量导入节点、生成设备分流规则并安全地修改 `/etc/openclash/config/config.yaml`。
+一个运行在 OpenWrt LuCI 中的 OpenClash 配置可视化编辑器，用于批量导入节点、生成设备分流规则并安全地修改 OpenClash 当前选用的 YAML 配置。
 
 ## 功能
 
@@ -71,7 +71,7 @@ sh -c "$(wget -qO- https://raw.githubusercontent.com/rainbowgag/openclash-editor
 
 ## 依赖与适用范围
 
-- 已安装 OpenClash，并存在 `/etc/openclash/config/config.yaml`
+- 已安装并选择 OpenClash YAML 配置；插件会从 `openclash.config.config_path` 自动识别实际文件路径和自定义文件名
 - 带 Lua 兼容层的 LuCI
 - Ruby、Ruby YAML 和 Psych（OpenClash 通常已经安装）
 - 纯 Lua、Ruby、Shell 和浏览器 JavaScript 实现，不包含 CPU 架构相关二进制；支持 x86_64 与 ARM，已在 aarch64/ARMv8 上实机验证
@@ -89,10 +89,10 @@ sh -c "$(wget -qO- https://raw.githubusercontent.com/rainbowgag/openclash-editor
 点击应用时会再次校验 YAML，并在下面的目录创建带时间戳的隐藏备份：
 
 ```text
-/etc/openclash/config/.config.yaml.editor-backup-YYYYMMDD-HHMMSS
+当前配置所在目录/.配置文件名.editor-backup-YYYYMMDD-HHMMSS
 ```
 
-“恢复初始配置”也会先创建 `.config.yaml.before-reset-YYYYMMDD-HHMMSS` 备份；它只清空节点、`pr.proxies` 名称和 `SRC-IP-CIDR` 设备规则，保留其他 OpenClash 配置与基础规则。
+“恢复初始配置”也会先创建 `.配置文件名.before-reset-YYYYMMDD-HHMMSS` 备份；它只清空节点、`pr.proxies` 名称和 `SRC-IP-CIDR` 设备规则，保留其他 OpenClash 配置与基础规则。
 
 应用后不会自动重启 OpenClash，避免未经确认中断当前网络。
 
