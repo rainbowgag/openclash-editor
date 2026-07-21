@@ -5,6 +5,7 @@
 ## 功能
 
 - 批量转换 VLESS、VMess、Hysteria2/Hy2 和 SOCKS5 节点
+- 可按“名称前缀 + 起始数”批量重命名本次转换的节点
 - SOCKS5 支持 `IP:端口:用户名:密码`、`socks5://用户名:密码@IP:端口`、`用户名:密码@IP:端口`
 - 支持 VLESS Reality、TLS、WS、gRPC，以及 VMess HTTP 伪装传输
 - 可选写入 `dialer-proxy: 中转`
