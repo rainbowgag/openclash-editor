@@ -5,6 +5,7 @@ set -eu
 REPO="rainbowgag/openclash-editor"
 BRANCH="${OPENCLASH_EDITOR_BRANCH:-main}"
 BASE_URL="https://raw.githubusercontent.com/${REPO}/${BRANCH}"
+ARCHITECTURE="$(uname -m 2>/dev/null || echo unknown)"
 
 if [ "$(id -u)" != "0" ]; then
   echo "错误：请使用 root 用户运行安装命令。" >&2
@@ -46,7 +47,7 @@ fetch_file() {
   mv "$temporary" "$destination"
 }
 
-echo "正在安装 OpenClash Visual Editor..."
+echo "正在安装 OpenClash Visual Editor（系统架构：${ARCHITECTURE}）..."
 
 fetch_file "$BASE_URL/backend.rb" "/usr/share/openclash-editor/backend.rb"
 fetch_file "$BASE_URL/VERSION" "/usr/share/openclash-editor/VERSION"

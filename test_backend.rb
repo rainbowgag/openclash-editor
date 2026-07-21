@@ -9,6 +9,7 @@ preview_result = "/tmp/openclash-editor-test-preview-result.json"
 
 abort "state failed" unless system("ruby", backend, "state", out: state_file)
 state = YAML.safe_load(File.read(state_file), aliases: true)
+abort "architecture missing" if state["architecture"].to_s.empty?
 request = {
   "nodes" => state.fetch("nodes").map { |node| node.fetch("data") },
   "anchor_names" => state.fetch("nodes").select { |node| node["in_pr"] }.map { |node| node.fetch("name") },
@@ -26,6 +27,7 @@ File.write(request_file, YAML.dump(request))
 abort "preview failed" unless system("ruby", backend, "preview", request_file, out: preview_result)
 preview = YAML.safe_load(File.read(preview_result), aliases: true)
 abort preview.fetch("error", "preview error") unless preview["ok"]
+abort "change summary missing" unless preview["diff"].is_a?(String) && preview["diff"].include?("节点：")
 generated = YAML.load_file("/tmp/openclash-editor-preview.yaml", aliases: true)
 generated_nodes = Array(generated["proxies"])
 generated_anchor_names = Array(generated.dig("pr", "proxies")).map(&:to_s)
@@ -43,6 +45,7 @@ puts({
   "start_ip" => state.fetch("start_ip"),
   "network_cidr" => state.fetch("network_cidr"),
   "detected_lan_cidr" => state.fetch("detected_lan_cidr"),
+  "architecture" => state.fetch("architecture"),
   "pr_names" => generated_anchor_names.length,
   "first_keys" => generated_nodes.first&.keys&.first(4),
   "preview_bytes" => File.size("/tmp/openclash-editor-preview.yaml")

@@ -1,5 +1,5 @@
 <%+header%>
-<link rel="stylesheet" href="<%=resource%>/openclash-editor/editor.css?v=1.5.0">
+<link rel="stylesheet" href="<%=resource%>/openclash-editor/editor.css?v=1.5.1">
 <div class="oce-shell">
   <div class="oce-hero">
     <div><h2>OpenClash 可视编辑器</h2><p>节点管理 · 所有编辑先保存在浏览器草稿中</p></div>
@@ -30,8 +30,8 @@
     <div class="oce-actions" style="margin-top:14px"><a class="btn cbi-button cbi-button-action" href="<%=luci.dispatcher.build_url('admin','services','openclash','visual-editor-rules')%>">下一步：管理规则与应用 →</a></div>
   </div>
 </div>
-<script src="<%=resource%>/openclash-editor/converter.js?v=1.5.0"></script>
-<script src="<%=resource%>/openclash-editor/editor-common.js?v=1.5.0"></script>
+<script src="<%=resource%>/openclash-editor/converter.js?v=1.5.1"></script>
+<script src="<%=resource%>/openclash-editor/editor-common.js?v=1.5.1"></script>
 <script>
 (function(){
   var E=OpenClashEditor,draft,dialer=false,bulkRename={prefix:'',start:1,configured:false};
@@ -55,7 +55,7 @@
   el('update_btn').onclick=function(){if(!confirm('确认在线更新插件？正式 OpenClash 配置不会被修改。'))return;this.disabled=true;E.post(urls.update,{}).then(function(r){if(!r.ok)throw new Error(r.error+(r.details?'\n'+r.details:''));alert('插件已更新到 '+r.version+'，页面将刷新。');location.reload()}).catch(function(e){msg(e.message,'error');el('update_btn').disabled=false})};
   el('reset_btn').onclick=function(){if(!confirm('确认恢复初始配置？\n这会立即备份正式配置，然后清空全部节点、路由器代理节点名称和 SRC-IP-CIDR 设备规则；其他基础配置与规则会保留。'))return;this.disabled=true;E.post(urls.reset,{}).then(function(r){if(!r.ok)throw new Error(r.error+(r.details?'\n'+r.details:''));E.clearDraft();alert('已恢复初始配置。备份：'+r.backup);location.reload()}).catch(function(e){msg(e.message,'error');el('reset_btn').disabled=false})};
   el('dialer_btn').onclick=function(){dialer=!dialer;this.textContent=dialer?'已添加前置代理（中转）':'添加前置代理';el('dialer_hint').innerHTML=dialer?'新导入节点会添加 <code>dialer-proxy: 中转</code>':'前置代理未启用；启用后固定添加 <code>dialer-proxy: 中转</code>。'};el('bulk_rename_enabled').onchange=function(){el('bulk_rename_btn').disabled=!this.checked};el('bulk_rename_btn').onclick=openBulkRename;el('bulk_rename_prefix').oninput=updateBulkRenamePreview;el('bulk_rename_start').oninput=updateBulkRenamePreview;el('bulk_rename_confirm').onclick=saveBulkRename;el('bulk_rename_cancel').onclick=closeBulkRename;el('bulk_rename_modal').onclick=function(e){if(e.target===this)closeBulkRename()};el('import_btn').onclick=importNodes;el('clear_btn').onclick=function(){el('links').value=''};el('node_search').oninput=render;el('node_search_clear').onclick=function(){el('node_search').value='';render();el('node_search').focus()};el('existing_body').onclick=tableEvent;el('existing_body').onchange=tableEvent;el('new_body').onclick=tableEvent;el('new_body').onchange=tableEvent;
-  E.loadDraft().then(function(d){draft=d;el('add_to_pr').checked=!hasRouterProxy();render();msg('已读取正式配置；当前修改仅保存在浏览器草稿','ok');checkUpdate()}).catch(function(e){msg(e.message,'error')});
+  E.loadDraft().then(function(d){draft=d;el('add_to_pr').checked=!hasRouterProxy();render();msg('已读取正式配置；运行平台 '+draft.architecture+'；当前修改仅保存在浏览器草稿','ok');checkUpdate()}).catch(function(e){msg(e.message,'error')});
 })();
 </script>
 <%+footer%>

@@ -28,7 +28,10 @@ request = {
 }
 File.write(request_path, YAML.dump(request))
 formal_before = File.binread(source)
-abort "preview failed" unless system("ruby", backend, "preview", request_path, out: File::NULL)
+preview_output = IO.popen(["ruby", backend, "preview", request_path], &:read)
+preview_result = YAML.safe_load(preview_output, aliases: true)
+abort preview_result.fetch("error", "preview failed") unless preview_result["ok"]
+abort "SOCKS5 missing from change summary" unless preview_result.fetch("diff", "").include?(socks["name"])
 abort "formal config changed" unless File.binread(source) == formal_before
 
 generated = YAML.load_file("/tmp/openclash-editor-preview.yaml", aliases: true)

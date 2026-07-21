@@ -28,6 +28,7 @@
 - 一键恢复到无节点、无设备规则的初始配置（自动备份）
 - 自动检测 GitHub 新版本并在页面中一键更新
 - 先生成 `/tmp` 测试副本并显示差异，再备份和应用正式配置
+- 配置差异由 Ruby 后端直接生成，不依赖固件是否预装 `diff`/`diffutils`
 - 不自动重启 OpenClash
 
 ## 一键安装
@@ -73,6 +74,7 @@ sh -c "$(wget -qO- https://raw.githubusercontent.com/rainbowgag/openclash-editor
 - 已安装 OpenClash，并存在 `/etc/openclash/config/config.yaml`
 - 带 Lua 兼容层的 LuCI
 - Ruby、Ruby YAML 和 Psych（OpenClash 通常已经安装）
+- 纯 Lua、Ruby、Shell 和浏览器 JavaScript 实现，不包含 CPU 架构相关二进制；支持 x86_64 与 ARM，已在 aarch64/ARMv8 上实机验证
 - 默认通过 `ubus network.interface.lan` 检测网段，失败时回退到 UCI
 - 支持 `/1` 至 `/30` IPv4 网段，并自动跳过路由器自身地址和重复规则 IP
 
