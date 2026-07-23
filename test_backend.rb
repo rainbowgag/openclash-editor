@@ -10,7 +10,8 @@ preview_result = "/tmp/openclash-editor-test-preview-result.json"
 abort "state failed" unless system("ruby", backend, "state", out: state_file)
 state = YAML.safe_load(File.read(state_file), aliases: true)
 abort "architecture missing" if state["architecture"].to_s.empty?
-configured_source = `uci -q get openclash.config.config_path 2>/dev/null`.strip
+configured_source = ENV["OPENCLASH_CONFIG_PATH"].to_s.strip
+configured_source = `uci -q get openclash.config.config_path 2>/dev/null`.strip if configured_source.empty?
 abort "configured source path not detected" unless configured_source.empty? || state["source_path"] == configured_source
 request = {
   "nodes" => state.fetch("nodes").map { |node| node.fetch("data") },
