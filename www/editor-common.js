@@ -73,6 +73,29 @@
     return draft.next_ip;
   }
 
+  function removeNodes(draft, names) {
+    var selected = Object.create(null), existing = Object.create(null);
+    (names || []).forEach(function(name) { selected[String(name)] = true; });
+    draft.nodes.forEach(function(node) {
+      if (selected[node.name]) existing[node.name] = true;
+    });
+    var nodeCount = Object.keys(existing).length, beforeRules = draft.rules.length;
+    draft.nodes = draft.nodes.filter(function(node) { return !existing[node.name]; });
+    draft.rules = draft.rules.filter(function(rule) { return !existing[ruleParts(rule).name]; });
+    draft.selected_node_names = (draft.selected_node_names || []).filter(function(name) { return !existing[name]; });
+    recalculateNextIp(draft);
+    return {nodes: nodeCount, rules: beforeRules - draft.rules.length};
+  }
+
+  function removeRulesByIps(draft, ips) {
+    var selected = Object.create(null);
+    (ips || []).forEach(function(ip) { selected[String(ip)] = true; });
+    var before = draft.rules.length;
+    draft.rules = draft.rules.filter(function(rule) { return !selected[ruleParts(rule).ip]; });
+    recalculateNextIp(draft);
+    return before - draft.rules.length;
+  }
+
   function fromState(state) {
     var draft = {
       schema: 2,
@@ -138,6 +161,7 @@
     loadDraft: loadDraft, saveDraft: saveDraft, clearDraft: clearDraft,
     recalculateNextIp: recalculateNextIp,
     ipToInt: ipToInt, intToIp: intToIp, cidrInfo: cidrInfo,
-    ruleParts: ruleParts, numberNodes: numberNodes, esc: esc
+    ruleParts: ruleParts, numberNodes: numberNodes,
+    removeNodes: removeNodes, removeRulesByIps: removeRulesByIps, esc: esc
   };
 })(window);

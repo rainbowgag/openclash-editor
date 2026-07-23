@@ -41,3 +41,29 @@ const numbered = Array.from({length: 10}, (_, index) => ({name: `old-${index + 1
 OpenClashEditor.numberNodes(numbered, '美国', 5);
 if (numbered[0].name !== '美国5' || numbered[9].name !== '美国14') throw new Error('bulk node numbering failed');
 console.log(`${numbered[0].name}...${numbered[9].name}`);
+
+const draft = {
+  nodes: [
+    {name: '美国1'}, {name: '美国2'}, {name: '日本1'}
+  ],
+  rules: [
+    'SRC-IP-CIDR,192.168.100.2/32,美国1',
+    'SRC-IP-CIDR,192.168.100.3/32,美国2',
+    'SRC-IP-CIDR,192.168.100.4/32,美国1',
+    'SRC-IP-CIDR,192.168.100.5/32,日本1'
+  ],
+  selected_node_names: ['美国1', '日本1'],
+  network_cidr: '192.168.100.0/24',
+  start_ip: '192.168.100.2',
+  gateway_ip: '192.168.100.1'
+};
+const removedNodes = OpenClashEditor.removeNodes(draft, ['美国1', '不存在']);
+if (removedNodes.nodes !== 1 || removedNodes.rules !== 2) throw new Error('bulk node removal returned wrong counts');
+if (draft.nodes.some(item => item.name === '美国1') || draft.rules.some(rule => rule.endsWith(',美国1'))) throw new Error('bulk node removal left linked data');
+if (draft.selected_node_names.join(',') !== '日本1') throw new Error('bulk node removal left selected node names');
+if (draft.next_ip !== '192.168.100.2') throw new Error(`released IP was not reused: ${draft.next_ip}`);
+
+const removedRules = OpenClashEditor.removeRulesByIps(draft, ['192.168.100.3/32']);
+if (removedRules !== 1 || draft.nodes.length !== 2) throw new Error('bulk rule removal changed nodes or returned wrong count');
+if (draft.rules.some(rule => OpenClashEditor.ruleParts(rule).ip === '192.168.100.3/32')) throw new Error('bulk rule removal left selected IP');
+console.log(JSON.stringify({removedNodes, removedRules, nextIp: draft.next_ip}));
