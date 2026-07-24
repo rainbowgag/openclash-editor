@@ -40,14 +40,16 @@
 通过 VPS 镜像安装，安装完成后插件的版本检查和在线更新也会继续使用该镜像：
 
 ```sh
-sh -c "$(uclient-fetch -qO- https://yy.yaml.uk:9443/openclash-editor/install.sh)"
+curl -fL --connect-timeout 20 -o /tmp/openclash-editor-install.sh https://yy.yaml.uk:9443/openclash-editor/install.sh && sh /tmp/openclash-editor-install.sh
 ```
 
-如果固件没有 `uclient-fetch`：
+如果固件没有 `curl`：
 
 ```sh
-sh -c "$(wget -qO- https://yy.yaml.uk:9443/openclash-editor/install.sh)"
+wget -T 20 -O /tmp/openclash-editor-install.sh https://yy.yaml.uk:9443/openclash-editor/install.sh && sh /tmp/openclash-editor-install.sh
 ```
+
+安装器会优先使用 `curl` 或完整版 `wget`，仅在二者都不存在时才回退到 `uclient-fetch`，以规避部分 iStoreOS 固件的 TLS 证书校验兼容问题。
 
 镜像同时提供 `SHA256SUMS` 文件，可用于核对发布文件完整性。
 
