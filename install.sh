@@ -37,12 +37,12 @@ fetch_file() {
   temporary="${destination}.download"
   mkdir -p "$(dirname "$destination")"
 
-  if command -v uclient-fetch >/dev/null 2>&1; then
-    uclient-fetch -q -O "$temporary" "$url"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fL --connect-timeout 20 --max-time 120 --retry 2 --show-error --silent "$url" -o "$temporary"
   elif command -v wget >/dev/null 2>&1; then
-    wget -q -O "$temporary" "$url"
-  elif command -v curl >/dev/null 2>&1; then
-    curl -fsSL "$url" -o "$temporary"
+    wget -T 20 -t 2 -O "$temporary" "$url"
+  elif command -v uclient-fetch >/dev/null 2>&1; then
+    uclient-fetch -T 20 -O "$temporary" "$url"
   else
     echo "错误：系统缺少 uclient-fetch、wget 或 curl。" >&2
     exit 1

@@ -16,12 +16,12 @@ fi
 BASE_URL="${BASE_URL%/}"
 
 fetch_stdout() {
-  if command -v uclient-fetch >/dev/null 2>&1; then
-    uclient-fetch -q -O - "$1"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fL --connect-timeout 20 --max-time 120 --retry 2 --show-error --silent "$1"
   elif command -v wget >/dev/null 2>&1; then
-    wget -qO- "$1"
-  elif command -v curl >/dev/null 2>&1; then
-    curl -fsSL "$1"
+    wget -T 20 -t 2 -O - "$1"
+  elif command -v uclient-fetch >/dev/null 2>&1; then
+    uclient-fetch -T 20 -O - "$1"
   else
     echo "缺少下载工具" >&2
     exit 1
