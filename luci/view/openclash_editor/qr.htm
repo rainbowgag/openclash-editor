@@ -1,5 +1,5 @@
 <%+header%>
-<link rel="stylesheet" href="<%=resource%>/openclash-editor/editor.css?v=1.7.0-test.7">
+<link rel="stylesheet" href="<%=resource%>/openclash-editor/editor.css?v=1.7.0-test.8">
 <style>
   .oce-qr-grid{display:grid;grid-template-columns:minmax(300px,1fr) minmax(300px,1fr);gap:20px}
   .oce-qr-output{min-height:360px;display:flex;align-items:center;justify-content:center;flex-direction:column;text-align:center}
@@ -60,10 +60,15 @@
         <button id="refresh_devices" class="btn cbi-button" type="button">刷新列表</button>
       </div>
     </div>
+    <div class="oce-actions" style="margin:12px 0">
+      <label class="oce-check-label"><input id="device_select_all" class="oce-check" type="checkbox"> 全选当前列表</label>
+      <button id="device_bulk_delete" class="btn cbi-button oce-danger" type="button" disabled>批量删除（0）</button>
+      <span class="oce-muted">搜索后全选只选择当前搜索结果</span>
+    </div>
     <div class="oce-scroll">
       <table class="oce-table">
-        <thead><tr><th>设备</th><th>固定 IP / MAC</th><th>状态</th><th>当前代理节点（可修改）</th><th>操作</th></tr></thead>
-        <tbody id="device_body"><tr><td colspan="5" class="oce-empty">正在读取扫码设备……</td></tr></tbody>
+        <thead><tr><th style="width:56px">选择</th><th>设备</th><th>固定 IP / MAC</th><th>状态</th><th>当前代理节点（可修改）</th><th>操作</th></tr></thead>
+        <tbody id="device_body"><tr><td colspan="6" class="oce-empty">正在读取扫码设备……</td></tr></tbody>
       </table>
     </div>
     <p class="oce-muted">“取消代理”只删除该设备的 OpenClash 规则，保留 DHCP 固定地址；“删除设备”会同时删除规则和扫码创建的固定租约，不会删除代理节点。</p>
@@ -77,7 +82,7 @@
     </div>
   </section>
 </div>
-<script src="<%=resource%>/openclash-editor/editor-common.js?v=1.7.0-test.7"></script>
+<script src="<%=resource%>/openclash-editor/editor-common.js?v=1.7.0-test.8"></script>
 <script>
 (function(){
   var E=OpenClashEditor;
@@ -88,10 +93,11 @@
     change:'<%=luci.dispatcher.build_url("admin","services","openclash","visual-editor-qr-change")%>',
     unproxy:'<%=luci.dispatcher.build_url("admin","services","openclash","visual-editor-qr-unproxy")%>',
     remove:'<%=luci.dispatcher.build_url("admin","services","openclash","visual-editor-qr-delete")%>',
+    removeBulk:'<%=luci.dispatcher.build_url("admin","services","openclash","visual-editor-qr-delete-bulk")%>',
     restart:'<%=luci.dispatcher.build_url("admin","services","openclash","visual-editor-restart")%>',
     bind:'<%=luci.dispatcher.build_url("oeb")%>'
   };
-  var timer=null,devices=[],knownNodes=[];
+  var timer=null,devices=[],knownNodes=[],selectedDeviceMacs=Object.create(null);
   function el(id){return document.getElementById(id)}
   function msg(text,type){var x=el('status');x.textContent=text;x.className='oce-status '+(type==='ok'?'oce-ok':type==='warn'?'oce-warn':'oce-error')}
   function clearQr(){
@@ -112,7 +118,8 @@
   function deviceRow(device){
     var online=device.online?'<span class="oce-online">在线</span>':'<span class="oce-offline">离线</span>';
     var addressHint=device.private_mac_likely?'<div class="oce-muted">可能为私有地址</div>':'';
-    return '<tr data-mac="'+E.esc(device.mac)+'"><td><strong>'+E.esc(device.name)+'</strong>'+addressHint+'</td>'+
+    return '<tr data-mac="'+E.esc(device.mac)+'"><td><input class="device-select oce-check" data-mac="'+E.esc(device.mac)+'" type="checkbox" '+(selectedDeviceMacs[device.mac]?'checked':'')+' aria-label="选择设备 '+E.esc(device.name)+'"></td>'+
+      '<td><strong>'+E.esc(device.name)+'</strong>'+addressHint+'</td>'+
       '<td><strong>'+E.esc(device.ip)+'</strong><div class="oce-muted">'+E.esc(device.mac)+'</div></td>'+
       '<td>'+online+'</td>'+
       '<td><input class="oce-input oce-device-node" list="node_names" value="'+E.esc(device.node||'')+'" placeholder="输入已有节点名称"></td>'+
@@ -120,11 +127,27 @@
       '<button class="btn cbi-button device-unproxy" type="button">取消代理</button> '+
       '<button class="btn cbi-button oce-danger device-delete" type="button">删除设备</button></td></tr>';
   }
+  function visibleDeviceMacs(){
+    var query=(el('device_search').value||'').trim().toLowerCase();
+    return devices.filter(function(device){return !query||[device.name,device.ip,device.mac,device.node].some(function(value){return String(value||'').toLowerCase().indexOf(query)>=0})}).map(function(device){return device.mac});
+  }
+  function syncDeviceSelection(){
+    var visible=visibleDeviceMacs(),selectedVisible=visible.filter(function(mac){return selectedDeviceMacs[mac]}).length;
+    var selectedTotal=Object.keys(selectedDeviceMacs).filter(function(mac){return selectedDeviceMacs[mac]&&devices.some(function(device){return device.mac===mac})}).length;
+    var control=el('device_select_all');
+    control.disabled=visible.length===0;
+    control.checked=visible.length>0&&selectedVisible===visible.length;
+    control.indeterminate=selectedVisible>0&&selectedVisible<visible.length;
+    el('device_bulk_delete').disabled=selectedTotal===0;
+    el('device_bulk_delete').textContent='批量删除（'+selectedTotal+'）';
+  }
   function renderDevices(){
     var query=(el('device_search').value||'').trim().toLowerCase();
+    var valid=Object.create(null);devices.forEach(function(device){valid[device.mac]=true});Object.keys(selectedDeviceMacs).forEach(function(mac){if(!valid[mac])delete selectedDeviceMacs[mac]});
     var shown=devices.filter(function(device){return !query||[device.name,device.ip,device.mac,device.node].some(function(value){return String(value||'').toLowerCase().indexOf(query)>=0})});
     el('device_count').textContent=query?'显示 '+shown.length+' / '+devices.length:devices.length+' 台';
-    el('device_body').innerHTML=shown.map(deviceRow).join('')||'<tr><td colspan="5" class="oce-empty">'+(query?'没有匹配的扫码设备':'还没有扫码绑定的设备')+'</td></tr>';
+    el('device_body').innerHTML=shown.map(deviceRow).join('')||'<tr><td colspan="6" class="oce-empty">'+(query?'没有匹配的扫码设备':'还没有扫码绑定的设备')+'</td></tr>';
+    syncDeviceSelection();
   }
   function loadDevices(){
     el('refresh_devices').disabled=true;
@@ -163,6 +186,21 @@
   };
   el('refresh_devices').onclick=loadDevices;
   el('device_search').oninput=renderDevices;
+  el('device_select_all').onchange=function(){
+    var checked=this.checked;visibleDeviceMacs().forEach(function(mac){if(checked)selectedDeviceMacs[mac]=true;else delete selectedDeviceMacs[mac]});renderDevices();
+  };
+  el('device_bulk_delete').onclick=function(){
+    var macs=Object.keys(selectedDeviceMacs).filter(function(mac){return selectedDeviceMacs[mac]&&devices.some(function(device){return device.mac===mac})});
+    if(!macs.length)return;
+    if(!confirm('确认批量删除选中的 '+macs.length+' 台扫码设备？\n将同时删除对应设备规则和扫码创建的 DHCP 固定租约，但不会删除代理节点。'))return;
+    var button=this;button.disabled=true;
+    E.post(urls.removeBulk,{macs:macs.join(','),reload:el('reload_openclash').checked?'1':'0'}).then(function(result){
+      if(!result.ok)throw new Error(result.error+(result.details?'\n'+result.details:''));
+      selectedDeviceMacs=Object.create(null);
+      alert('已批量删除 '+result.deleted_count+' 台扫码设备。');
+      return loadDevices();
+    }).catch(function(error){msg('批量删除失败：'+error.message,'error');button.disabled=false});
+  };
   el('apply_config').onclick=function(){
     if(!confirm('确认应用当前正式配置并重启 OpenClash？\n网络可能会短暂中断。'))return;
     var button=this;button.disabled=true;
@@ -176,6 +214,11 @@
     });
   };
   el('device_body').onclick=function(event){
+    if(event.target.classList.contains('device-select')){
+      var selectedMac=event.target.getAttribute('data-mac');
+      if(event.target.checked)selectedDeviceMacs[selectedMac]=true;else delete selectedDeviceMacs[selectedMac];
+      syncDeviceSelection();return;
+    }
     var row=event.target.closest('tr[data-mac]');if(!row)return;
     var mac=row.getAttribute('data-mac'),input=row.querySelector('.oce-device-node'),node=input?input.value.trim():'';
     if(event.target.classList.contains('device-change')){

@@ -70,6 +70,7 @@ function index()
 	entry({"admin", "services", "openclash", "visual-editor-qr-change"}, call("action_qr_change")).leaf = true
 	entry({"admin", "services", "openclash", "visual-editor-qr-unproxy"}, call("action_qr_unproxy")).leaf = true
 	entry({"admin", "services", "openclash", "visual-editor-qr-delete"}, call("action_qr_delete")).leaf = true
+	entry({"admin", "services", "openclash", "visual-editor-qr-delete-bulk"}, call("action_qr_delete_bulk")).leaf = true
 	entry({"openclash-editor-bind"}, call("action_qr_bind")).leaf = true
 	entry({"oeb"}, call("action_qr_bind")).leaf = true
 end
@@ -173,6 +174,33 @@ end
 function action_qr_delete()
 	local ok, err = xpcall(function() qr_device_action("qr-device-delete", false) end, debug.traceback)
 	if not ok then reply(false, { error = "删除扫码设备失败", details = err }) end
+end
+
+local function qr_delete_bulk_impl()
+	local raw = http.formvalue("macs") or ""
+	if type(raw) ~= "string" or #raw > 4608 then
+		return reply(false, { error = "批量删除参数无效" })
+	end
+	local macs = {}
+	for mac in raw:gmatch("[^,]+") do
+		mac = mac:gsub("^%s+", ""):gsub("%s+$", ""):lower()
+		if mac ~= "" then macs[#macs + 1] = mac end
+	end
+	if #macs == 0 then return reply(false, { error = "请至少选择一台扫码设备" }) end
+	if #macs > 256 then return reply(false, { error = "单次最多批量删除 256 台设备" }) end
+	local reload_openclash = http.formvalue("reload") == "1" and "1" or "0"
+	local result, backend_error, details = run_backend(
+		"qr-devices-delete " .. shellquote(table.concat(macs, ",")) .. " " .. reload_openclash
+	)
+	if not result then return reply(false, { error = backend_error, details = details }) end
+	if not result.ok then return reply(false, result) end
+	reply(true, result)
+end
+
+function action_qr_delete_bulk()
+	if not require_post() then return end
+	local ok, err = xpcall(qr_delete_bulk_impl, debug.traceback)
+	if not ok then reply(false, { error = "批量删除扫码设备失败", details = err }) end
 end
 
 local function qr_bind_page(title, body, tone)

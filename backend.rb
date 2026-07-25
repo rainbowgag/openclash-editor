@@ -479,6 +479,60 @@ def qr_device_delete_response(mac, reload_openclash)
   }
 end
 
+def qr_devices_delete_response(mac_list, reload_openclash)
+  macs = mac_list.to_s.split(",").map { |mac| mac.strip.downcase }.reject(&:empty?).uniq
+  raise "请至少选择一台扫码设备" if macs.empty?
+  raise "单次最多批量删除 256 台设备" if macs.length > 256
+
+  managed = macs.map do |mac|
+    section, device = qr_managed_device(mac)
+    [section, device]
+  end
+  addresses = managed.map { |_section, device| device["ip"] }
+  address_set = addresses.to_h { |address| [address, true] }
+
+  config = load_config
+  rules = device_rules(config).reject do |rule|
+    parts = rule_parts(rule)
+    parts && address_set[parts["ip"]]
+  end
+  lines = File.read(SOURCE).gsub("\r\n", "\n").split("\n", -1)
+  replace_device_rules(lines, rules)
+  generated = lines.join("\n")
+  parsed = YAML.safe_load(generated, aliases: true)
+  raise "批量删除生成的配置不是有效 YAML" unless parsed.is_a?(Hash)
+
+  stamp = Time.now.strftime("%Y%m%d-%H%M%S")
+  backup = File.join(File.dirname(SOURCE), ".#{File.basename(SOURCE)}.qr-backup-#{stamp}")
+  File.binwrite(backup, File.binread(SOURCE))
+  mode = File.stat(SOURCE).mode & 0o777
+  File.chmod(mode, backup)
+  staged = "#{SOURCE}.editor-qr"
+  File.write(staged, generated)
+  File.chmod(mode, staged)
+  File.rename(staged, SOURCE)
+
+  begin
+    deleted = managed.all? { |section, _device| system("uci", "-q", "delete", "dhcp.#{section}") }
+    unless deleted && system("uci", "commit", "dhcp")
+      system("uci", "revert", "dhcp")
+      raise "批量删除 DHCP 固定租约失败"
+    end
+    system("/etc/init.d/dnsmasq", "reload") || raise("重新载入 DHCP 服务失败")
+  rescue StandardError
+    File.binwrite(SOURCE, File.binread(backup))
+    raise
+  end
+
+  {
+    "ok" => true,
+    "deleted_count" => managed.length,
+    "deleted_macs" => managed.map { |_section, device| device["mac"] },
+    "backup" => backup,
+    "reload_openclash" => request_openclash_reload(reload_openclash)
+  }
+end
+
 def qr_bind_response(token, remote_address)
   path, data = qr_read_token(token)
   claimed_path = "#{path}.binding"
@@ -762,6 +816,7 @@ if __FILE__ == $PROGRAM_NAME
              when "qr-device-change" then qr_device_change_response(ARGV.fetch(1), ARGV.fetch(2), ARGV[3] == "1")
              when "qr-device-unproxy" then qr_device_unproxy_response(ARGV.fetch(1), ARGV[2] == "1")
              when "qr-device-delete" then qr_device_delete_response(ARGV.fetch(1), ARGV[2] == "1")
+             when "qr-devices-delete" then qr_devices_delete_response(ARGV.fetch(1), ARGV[2] == "1")
              else raise "未知操作"
              end
     puts json_generate(result)
