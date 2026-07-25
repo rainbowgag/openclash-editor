@@ -37,6 +37,14 @@
 
 ## 一键安装
 
+### 扫码绑定独立测试版
+
+下面的命令固定安装 `codex/qr-device-binding-test` 测试通道，不会切换 VPS 的稳定版。`--resolve` 可在路由器本地 DNS 暂时不可用时仍然校验证书并下载，安装后的在线更新也会记住该解析地址：
+
+```sh
+curl -fL --resolve yy.yaml.uk:9443:103.27.78.68 --connect-timeout 20 --max-time 120 --retry 2 --show-error -o /tmp/openclash-editor-qr-test.sh 'https://yy.yaml.uk:9443/openclash-editor/qr-device-binding-test/install.sh' && OPENCLASH_EDITOR_BASE_URL='https://yy.yaml.uk:9443/openclash-editor/qr-device-binding-test' OPENCLASH_EDITOR_RESOLVE_IP='103.27.78.68' sh /tmp/openclash-editor-qr-test.sh
+```
+
 ### 中国大陆镜像（推荐）
 
 通过 VPS 镜像安装，安装完成后插件的版本检查和在线更新也会继续使用该镜像：

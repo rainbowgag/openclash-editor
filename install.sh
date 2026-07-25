@@ -7,6 +7,9 @@ BRANCH="${OPENCLASH_EDITOR_BRANCH:-main}"
 DEFAULT_BASE_URL="https://raw.githubusercontent.com/${REPO}/${BRANCH}"
 BASE_URL="${OPENCLASH_EDITOR_BASE_URL:-$DEFAULT_BASE_URL}"
 BASE_URL="${BASE_URL%/}"
+RESOLVE_IP_FILE="/usr/share/openclash-editor/RESOLVE_IP"
+RESOLVE_IP="${OPENCLASH_EDITOR_RESOLVE_IP:-}"
+[ -n "$RESOLVE_IP" ] || [ ! -s "$RESOLVE_IP_FILE" ] || RESOLVE_IP="$(sed -n '1p' "$RESOLVE_IP_FILE")"
 ARCHITECTURE="$(uname -m 2>/dev/null || echo unknown)"
 CONFIG_PATH="$(uci -q get openclash.config.config_path 2>/dev/null || true)"
 [ -n "$CONFIG_PATH" ] || CONFIG_PATH="/etc/openclash/config/config.yaml"
@@ -43,7 +46,12 @@ fetch_file() {
   mkdir -p "$(dirname "$destination")"
 
   if command -v curl >/dev/null 2>&1; then
-    curl -fL --connect-timeout 20 --max-time 120 --retry 2 --show-error --silent "$url" -o "$temporary"
+    if [ -n "$RESOLVE_IP" ]; then
+      curl -fL --connect-timeout 20 --max-time 120 --retry 2 --show-error --silent \
+        --resolve "yy.yaml.uk:9443:${RESOLVE_IP}" "$url" -o "$temporary"
+    else
+      curl -fL --connect-timeout 20 --max-time 120 --retry 2 --show-error --silent "$url" -o "$temporary"
+    fi
   elif command -v wget >/dev/null 2>&1; then
     wget -T 20 -t 2 -O "$temporary" "$url"
   elif command -v uclient-fetch >/dev/null 2>&1; then
@@ -70,11 +78,17 @@ fetch_file "$BASE_URL/www/converter.js" "/www/luci-static/resources/openclash-ed
 fetch_file "$BASE_URL/www/editor-common.js" "/www/luci-static/resources/openclash-editor/editor-common.js"
 fetch_file "$BASE_URL/www/editor.css" "/www/luci-static/resources/openclash-editor/editor.css"
 printf '%s\n' "$BASE_URL" > /usr/share/openclash-editor/SOURCE_URL
+if [ -n "$RESOLVE_IP" ]; then
+  printf '%s\n' "$RESOLVE_IP" > "$RESOLVE_IP_FILE"
+else
+  rm -f "$RESOLVE_IP_FILE"
+fi
 
 chmod 755 /usr/share/openclash-editor/backend.rb
 chmod 755 /usr/share/openclash-editor/update.sh
 chmod 644 /usr/share/openclash-editor/VERSION
 chmod 644 /usr/share/openclash-editor/SOURCE_URL
+[ ! -f "$RESOLVE_IP_FILE" ] || chmod 600 "$RESOLVE_IP_FILE"
 chmod 644 /usr/lib/lua/luci/controller/openclash_editor.lua
 chmod 644 /usr/lib/lua/luci/view/openclash_editor/nodes.htm
 chmod 644 /usr/lib/lua/luci/view/openclash_editor/rules.htm

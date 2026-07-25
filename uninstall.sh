@@ -10,6 +10,7 @@ fi
 rm -f /usr/share/openclash-editor/backend.rb
 rm -f /usr/share/openclash-editor/VERSION
 rm -f /usr/share/openclash-editor/SOURCE_URL
+rm -f /usr/share/openclash-editor/RESOLVE_IP
 rm -f /usr/share/openclash-editor/update.sh
 rm -f /usr/lib/lua/luci/controller/openclash_editor.lua
 rm -f /usr/lib/lua/luci/view/openclash_editor/index.htm
