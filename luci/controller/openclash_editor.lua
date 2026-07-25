@@ -32,6 +32,17 @@ local function shellquote(value)
 	return "'" .. tostring(value):gsub("'", "'\\''") .. "'"
 end
 
+local function schedule_openclash_restart()
+	if not fs.access("/etc/init.d/openclash") then
+		return false, "未找到 /etc/init.d/openclash"
+	end
+	local command = "(sleep 2; /etc/init.d/openclash restart) >/tmp/openclash-editor-restart.log 2>&1 &"
+	if sys.call("sh -c " .. shellquote(command)) ~= 0 then
+		return false, "无法启动 OpenClash 后台重启任务"
+	end
+	return true
+end
+
 function index()
 	if not fs.access(get_source_path()) then return end
 	local page = entry({"admin", "services", "openclash", "visual-editor"},
@@ -152,7 +163,15 @@ local function apply_impl()
 	end
 	fs.remove(token_path)
 	fs.remove(preview_source_path)
-	reply(true, { message = "配置已应用，但尚未重启 OpenClash", backup = backup })
+	local restart_ok, restart_error = schedule_openclash_restart()
+	if not restart_ok then
+		return reply(true, {
+			message = "配置已应用，但 OpenClash 重启任务启动失败",
+			warning = restart_error,
+			backup = backup
+		})
+	end
+	reply(true, { message = "配置已应用，OpenClash 正在后台重启", backup = backup })
 end
 
 function action_apply()
