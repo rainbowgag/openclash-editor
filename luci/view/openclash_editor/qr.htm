@@ -1,5 +1,5 @@
 <%+header%>
-<link rel="stylesheet" href="<%=resource%>/openclash-editor/editor.css?v=1.7.0-test.1">
+<link rel="stylesheet" href="<%=resource%>/openclash-editor/editor.css?v=1.7.0-test.3">
 <style>
   .oce-qr-grid{display:grid;grid-template-columns:minmax(300px,1fr) minmax(300px,1fr);gap:20px}
   .oce-qr-output{min-height:360px;display:flex;align-items:center;justify-content:center;flex-direction:column;text-align:center}
@@ -54,7 +54,7 @@
     <p>扫码确认后，路由器会根据访问来源查找 DHCP 租约，把当前地址固定给这台手机，并新增或替换对应的 <code>SRC-IP-CIDR,手机IP/32,节点名称</code> 规则。修改正式 YAML 前会自动创建 <code>.qr-backup-时间</code> 备份。</p>
   </section>
 </div>
-<script src="<%=resource%>/openclash-editor/editor-common.js?v=1.7.0-test.1"></script>
+<script src="<%=resource%>/openclash-editor/editor-common.js?v=1.7.0-test.3"></script>
 <script>
 (function(){
   var E=OpenClashEditor;
@@ -76,7 +76,8 @@
   }
   function drawQr(url){
     return L.require('uqr').then(function(Uqr){
-      var renderer=new Uqr();
+      var renderer=typeof Uqr==='function'?new Uqr():Uqr;
+      if(!renderer||typeof renderer.renderSVG!=='function')throw new Error('当前 LuCI 二维码组件不兼容');
       el('qr').innerHTML=renderer.renderSVG(url,{pixelSize:7,border:4,ecc:'M'});
     });
   }
