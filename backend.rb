@@ -190,7 +190,7 @@ def system_architecture
 end
 
 def qr_token_path(token)
-  raise "无效或已过期的二维码" unless token.to_s.match?(/\A[0-9a-f]{48}\z/)
+  raise "无效或已过期的二维码" unless token.to_s.match?(/\A[0-9a-f]{32}\z/)
   File.join(QR_TOKEN_DIR, "#{token}.json")
 end
 
@@ -210,7 +210,7 @@ def qr_create_response(node_name, reload_openclash)
   rescue Errno::ENOENT
     nil
   end
-  token = File.binread("/dev/urandom", 24).unpack1("H*")
+  token = File.binread("/dev/urandom", 16).unpack1("H*")
   expires_at = Time.now.to_i + QR_TOKEN_TTL
   path = qr_token_path(token)
   File.write(path, json_generate({

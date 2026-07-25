@@ -1,9 +1,9 @@
 <%+header%>
-<link rel="stylesheet" href="<%=resource%>/openclash-editor/editor.css?v=1.7.0-test.3">
+<link rel="stylesheet" href="<%=resource%>/openclash-editor/editor.css?v=1.7.0-test.4">
 <style>
   .oce-qr-grid{display:grid;grid-template-columns:minmax(300px,1fr) minmax(300px,1fr);gap:20px}
   .oce-qr-output{min-height:360px;display:flex;align-items:center;justify-content:center;flex-direction:column;text-align:center}
-  .oce-qr-output svg{width:min(320px,85vw);height:auto;max-width:100%;border:12px solid #fff;border-radius:12px;box-shadow:0 8px 28px #15254b22}
+  .oce-qr-output svg{width:min(440px,88vw);height:auto;max-width:100%;border:14px solid #fff;border-radius:12px;box-shadow:0 8px 28px #15254b22}
   .oce-qr-url{max-width:100%;word-break:break-all;margin-top:16px}
   .oce-step{padding:12px 15px;margin:10px 0;border-radius:10px;background:#edf4ff;color:#17366c;font-weight:600}
   @media(max-width:850px){.oce-qr-grid{grid-template-columns:1fr}}
@@ -46,6 +46,7 @@
       <div id="qr" style="display:none"></div>
       <strong id="expires" style="display:none;margin-top:14px"></strong>
       <code id="qr_url" class="oce-qr-url" style="display:none"></code>
+      <button id="copy_link" class="btn cbi-button" type="button" style="display:none;margin-top:14px">复制绑定链接</button>
     </section>
   </div>
 
@@ -54,21 +55,21 @@
     <p>扫码确认后，路由器会根据访问来源查找 DHCP 租约，把当前地址固定给这台手机，并新增或替换对应的 <code>SRC-IP-CIDR,手机IP/32,节点名称</code> 规则。修改正式 YAML 前会自动创建 <code>.qr-backup-时间</code> 备份。</p>
   </section>
 </div>
-<script src="<%=resource%>/openclash-editor/editor-common.js?v=1.7.0-test.3"></script>
+<script src="<%=resource%>/openclash-editor/editor-common.js?v=1.7.0-test.4"></script>
 <script>
 (function(){
   var E=OpenClashEditor;
   var urls={
     state:'<%=luci.dispatcher.build_url("admin","services","openclash","visual-editor-state")%>',
     create:'<%=luci.dispatcher.build_url("admin","services","openclash","visual-editor-qr-create")%>',
-    bind:'<%=luci.dispatcher.build_url("openclash-editor-bind")%>'
+    bind:'<%=luci.dispatcher.build_url("oeb")%>'
   };
   var timer=null;
   function el(id){return document.getElementById(id)}
   function msg(text,type){var x=el('status');x.textContent=text;x.className='oce-status '+(type==='ok'?'oce-ok':type==='warn'?'oce-warn':'oce-error')}
   function clearQr(){
     if(timer){clearInterval(timer);timer=null}
-    el('qr').innerHTML='';el('qr').style.display='none';el('expires').style.display='none';el('qr_url').style.display='none';el('placeholder').style.display='';
+    el('qr').innerHTML='';el('qr').style.display='none';el('expires').style.display='none';el('qr_url').style.display='none';el('copy_link').style.display='none';el('placeholder').style.display='';
   }
   function countdown(until){
     function update(){var left=Math.max(0,Math.ceil(until-Date.now()/1000));el('expires').textContent=left?'剩余有效时间：'+left+' 秒':'二维码已过期，请重新生成';if(!left&&timer){clearInterval(timer);timer=null}}
@@ -78,7 +79,7 @@
     return L.require('uqr').then(function(Uqr){
       var renderer=typeof Uqr==='function'?new Uqr():Uqr;
       if(!renderer||typeof renderer.renderSVG!=='function')throw new Error('当前 LuCI 二维码组件不兼容');
-      el('qr').innerHTML=renderer.renderSVG(url,{pixelSize:7,border:4,ecc:'M'});
+      el('qr').innerHTML=renderer.renderSVG(url,{pixelSize:10,border:5,ecc:'M'});
     });
   }
   el('generate').onclick=function(){
@@ -87,14 +88,20 @@
     button.disabled=true;clearQr();
     E.post(urls.create,{node:node,reload:el('reload_openclash').checked?'1':'0'}).then(function(result){
       if(!result.ok)throw new Error(result.error+(result.details?'\n'+result.details:''));
-      var url=location.protocol+'//'+location.host+urls.bind+'?token='+encodeURIComponent(result.token);
+      var url=location.protocol+'//'+location.host+urls.bind+'?t='+encodeURIComponent(result.token);
       return drawQr(url).then(function(){
-        el('placeholder').style.display='none';el('qr').style.display='';el('expires').style.display='';el('qr_url').style.display='';el('qr_url').textContent=url;
+        el('placeholder').style.display='none';el('qr').style.display='';el('expires').style.display='';el('qr_url').style.display='';el('copy_link').style.display='';el('qr_url').textContent=url;
         countdown(result.expires_at);msg('二维码已生成，请使用要绑定的手机扫码','ok');
       });
     }).catch(function(error){msg('生成失败：'+error.message,'error')}).then(function(){button.disabled=false});
   };
   el('clear').onclick=function(){clearQr();msg('页面上的二维码已清除；未使用的令牌会在 10 分钟后自动失效','warn')};
+  el('copy_link').onclick=function(){
+    var text=el('qr_url').textContent;
+    function done(){msg('绑定链接已复制，可发送到需要绑定的手机打开','ok')}
+    if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(text).then(done).catch(function(){fallbackCopy(text)})}else fallbackCopy(text);
+    function fallbackCopy(value){var area=document.createElement('textarea');area.value=value;area.style.position='fixed';area.style.opacity='0';document.body.appendChild(area);area.select();document.execCommand('copy');document.body.removeChild(area);done()}
+  };
   E.get(urls.state).then(function(state){
     if(!state.ok)throw new Error(state.error||'读取节点失败');
     el('version').textContent='测试版 '+state.version;

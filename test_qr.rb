@@ -23,7 +23,7 @@ YAML
 require_relative "backend"
 
 created = qr_create_response("test-node", false)
-abort "token not created" unless created["ok"] && created["token"].match?(/\A[0-9a-f]{48}\z/)
+abort "token not created" unless created["ok"] && created["token"].match?(/\A[0-9a-f]{32}\z/)
 info = qr_info_response(created["token"])
 abort "token node mismatch" unless info["node"] == "test-node"
 
