@@ -54,6 +54,10 @@ function index()
 	entry({"admin", "services", "openclash", "visual-editor-update-check"}, call("action_update_check")).leaf = true
 	entry({"admin", "services", "openclash", "visual-editor-update"}, call("action_update")).leaf = true
 	entry({"admin", "services", "openclash", "visual-editor-qr-create"}, call("action_qr_create")).leaf = true
+	entry({"admin", "services", "openclash", "visual-editor-qr-devices"}, call("action_qr_devices")).leaf = true
+	entry({"admin", "services", "openclash", "visual-editor-qr-change"}, call("action_qr_change")).leaf = true
+	entry({"admin", "services", "openclash", "visual-editor-qr-unproxy"}, call("action_qr_unproxy")).leaf = true
+	entry({"admin", "services", "openclash", "visual-editor-qr-delete"}, call("action_qr_delete")).leaf = true
 	entry({"openclash-editor-bind"}, call("action_qr_bind")).leaf = true
 	entry({"oeb"}, call("action_qr_bind")).leaf = true
 end
@@ -114,6 +118,49 @@ function action_qr_create()
 	if not require_post() then return end
 	local ok, err = xpcall(qr_create_impl, debug.traceback)
 	if not ok then reply(false, { error = "生成二维码失败", details = err }) end
+end
+
+function action_qr_devices()
+	local ok, err = xpcall(function()
+		local result, backend_err, details = run_backend("qr-devices")
+		if not result then return reply(false, { error = backend_err, details = details }) end
+		if not result.ok then return reply(false, result) end
+		reply(true, result)
+	end, debug.traceback)
+	if not ok then reply(false, { error = "读取扫码设备失败", details = err }) end
+end
+
+local function qr_device_action(command, require_node)
+	if not require_post() then return end
+	local mac = http.formvalue("mac") or ""
+	local node = http.formvalue("node") or ""
+	local reload_openclash = http.formvalue("reload") == "1" and "1" or "0"
+	if type(mac) ~= "string" or #mac > 32 then return reply(false, { error = "设备 MAC 地址无效" }) end
+	if require_node and (type(node) ~= "string" or node == "" or #node > 256) then
+		return reply(false, { error = "请输入已有节点名称" })
+	end
+	local backend_command = command .. " " .. shellquote(mac)
+	if require_node then backend_command = backend_command .. " " .. shellquote(node) end
+	backend_command = backend_command .. " " .. reload_openclash
+	local result, err, details = run_backend(backend_command)
+	if not result then return reply(false, { error = err, details = details }) end
+	if not result.ok then return reply(false, result) end
+	reply(true, result)
+end
+
+function action_qr_change()
+	local ok, err = xpcall(function() qr_device_action("qr-device-change", true) end, debug.traceback)
+	if not ok then reply(false, { error = "更换代理失败", details = err }) end
+end
+
+function action_qr_unproxy()
+	local ok, err = xpcall(function() qr_device_action("qr-device-unproxy", false) end, debug.traceback)
+	if not ok then reply(false, { error = "取消代理失败", details = err }) end
+end
+
+function action_qr_delete()
+	local ok, err = xpcall(function() qr_device_action("qr-device-delete", false) end, debug.traceback)
+	if not ok then reply(false, { error = "删除扫码设备失败", details = err }) end
 end
 
 local function qr_bind_page(title, body, tone)

@@ -323,18 +323,21 @@ def ensure_dhcp_reservation(mac, address, hostname)
   section
 end
 
-def apply_qr_rule(address, node_name)
+def apply_qr_rule_change(address, node_name = nil)
+  ipv4_to_i(address)
   config = load_config
-  names = Array(config["proxies"]).filter_map do |node|
-    node["name"].to_s if node.is_a?(Hash) && node["name"]
+  if node_name
+    names = Array(config["proxies"]).filter_map do |node|
+      node["name"].to_s if node.is_a?(Hash) && node["name"]
+    end
+    raise "目标节点不存在：#{node_name}" unless names.include?(node_name)
   end
-  raise "二维码对应的节点已被删除：#{node_name}" unless names.include?(node_name)
 
   rules = device_rules(config).reject do |rule|
     parts = rule_parts(rule)
     parts && parts["ip"] == address
   end
-  rules.unshift("SRC-IP-CIDR,#{address}/32,#{node_name}")
+  rules.unshift("SRC-IP-CIDR,#{address}/32,#{node_name}") if node_name
   lines = File.read(SOURCE).gsub("\r\n", "\n").split("\n", -1)
   replace_device_rules(lines, rules)
   generated = lines.join("\n")
@@ -351,6 +354,129 @@ def apply_qr_rule(address, node_name)
   File.chmod(mode, staged)
   File.rename(staged, SOURCE)
   backup
+end
+
+def apply_qr_rule(address, node_name)
+  apply_qr_rule_change(address, node_name)
+end
+
+def active_dhcp_leases
+  leases = []
+  return leases unless File.file?("/tmp/dhcp.leases")
+  File.foreach("/tmp/dhcp.leases") do |line|
+    fields = line.split
+    next unless fields.length >= 4
+    mac = fields[1].to_s.downcase
+    next unless mac.match?(/\A[0-9a-f]{2}(?::[0-9a-f]{2}){5}\z/)
+    leases << {
+      "expires_at" => fields[0].to_i,
+      "mac" => mac,
+      "ip" => fields[2].to_s,
+      "hostname" => fields[3].to_s
+    }
+  end
+  leases
+end
+
+def qr_managed_device(mac)
+  mac = mac.to_s.downcase
+  raise "无效的设备 MAC 地址" unless mac.match?(/\A[0-9a-f]{2}(?::[0-9a-f]{2}){5}\z/)
+  found = dhcp_host_sections.find do |section, values|
+    section.start_with?("oce_") && values["mac"].to_s.downcase == mac
+  end
+  raise "没有找到该扫码设备，可能已经被删除" unless found
+  section, values = found
+  address = values["ip"].to_s
+  ipv4_to_i(address)
+  [section, values.merge("mac" => mac, "ip" => address)]
+end
+
+def qr_devices_response
+  config = load_config
+  rules_by_ip = {}
+  device_rules(config).each do |rule|
+    parts = rule_parts(rule)
+    rules_by_ip[parts["ip"]] = parts["name"] if parts
+  end
+  leases_by_mac = active_dhcp_leases.to_h { |lease| [lease["mac"], lease] }
+  devices = dhcp_host_sections.filter_map do |section, values|
+    next unless section.start_with?("oce_")
+    mac = values["mac"].to_s.downcase
+    address = values["ip"].to_s
+    next unless mac.match?(/\A[0-9a-f]{2}(?::[0-9a-f]{2}){5}\z/)
+    begin
+      ipv4_to_i(address)
+    rescue StandardError
+      next
+    end
+    lease = leases_by_mac[mac]
+    {
+      "section" => section,
+      "name" => values["name"].to_s.empty? ? "扫码设备" : values["name"].to_s,
+      "mac" => mac,
+      "ip" => address,
+      "node" => rules_by_ip[address].to_s,
+      "online" => !lease.nil?,
+      "current_ip" => lease ? lease["ip"] : "",
+      "private_mac_likely" => (mac.split(":").first.to_i(16) & 2) != 0
+    }
+  end
+  devices.sort_by! { |device| ipv4_to_i(device["ip"]) }
+  { "ok" => true, "devices" => devices }
+end
+
+def request_openclash_reload(enabled)
+  return false unless enabled
+  system("sh", "-c", "(sleep 2; /etc/init.d/openclash restart) >/tmp/openclash-editor-qr-restart.log 2>&1 &")
+  true
+end
+
+def qr_device_change_response(mac, node_name, reload_openclash)
+  _section, device = qr_managed_device(mac)
+  lan_ip!(device["ip"])
+  backup = apply_qr_rule(device["ip"], node_name.to_s.strip)
+  {
+    "ok" => true,
+    "mac" => device["mac"],
+    "ip" => device["ip"],
+    "node" => node_name.to_s.strip,
+    "backup" => backup,
+    "reload_openclash" => request_openclash_reload(reload_openclash)
+  }
+end
+
+def qr_device_unproxy_response(mac, reload_openclash)
+  _section, device = qr_managed_device(mac)
+  backup = apply_qr_rule_change(device["ip"])
+  {
+    "ok" => true,
+    "mac" => device["mac"],
+    "ip" => device["ip"],
+    "backup" => backup,
+    "reload_openclash" => request_openclash_reload(reload_openclash)
+  }
+end
+
+def qr_device_delete_response(mac, reload_openclash)
+  section, device = qr_managed_device(mac)
+  backup = apply_qr_rule_change(device["ip"])
+  begin
+    unless system("uci", "-q", "delete", "dhcp.#{section}") && system("uci", "commit", "dhcp")
+      system("uci", "revert", "dhcp")
+      raise "删除 DHCP 固定租约失败"
+    end
+    system("/etc/init.d/dnsmasq", "reload") || raise("重新载入 DHCP 服务失败")
+  rescue StandardError
+    File.binwrite(SOURCE, File.binread(backup))
+    raise
+  end
+  {
+    "ok" => true,
+    "mac" => device["mac"],
+    "ip" => device["ip"],
+    "backup" => backup,
+    "reload_openclash" => request_openclash_reload(reload_openclash)
+  }
 end
 
 def qr_bind_response(token, remote_address)
@@ -632,6 +758,10 @@ if __FILE__ == $PROGRAM_NAME
              when "qr-create" then qr_create_response(ARGV.fetch(1), ARGV[2] == "1")
              when "qr-info" then qr_info_response(ARGV.fetch(1))
              when "qr-bind" then qr_bind_response(ARGV.fetch(1), ARGV.fetch(2))
+             when "qr-devices" then qr_devices_response
+             when "qr-device-change" then qr_device_change_response(ARGV.fetch(1), ARGV.fetch(2), ARGV[3] == "1")
+             when "qr-device-unproxy" then qr_device_unproxy_response(ARGV.fetch(1), ARGV[2] == "1")
+             when "qr-device-delete" then qr_device_delete_response(ARGV.fetch(1), ARGV[2] == "1")
              else raise "未知操作"
              end
     puts json_generate(result)

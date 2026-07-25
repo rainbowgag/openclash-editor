@@ -78,6 +78,7 @@ fetch_file "$BASE_URL/www/converter.js" "/www/luci-static/resources/openclash-ed
 fetch_file "$BASE_URL/www/editor-common.js" "/www/luci-static/resources/openclash-editor/editor-common.js"
 fetch_file "$BASE_URL/www/editor.css" "/www/luci-static/resources/openclash-editor/editor.css"
 printf '%s\n' "$BASE_URL" > /usr/share/openclash-editor/SOURCE_URL
+printf '%s\n' "scan" > /usr/share/openclash-editor/EDITION
 if [ -n "$RESOLVE_IP" ]; then
   printf '%s\n' "$RESOLVE_IP" > "$RESOLVE_IP_FILE"
 else
@@ -88,6 +89,7 @@ chmod 755 /usr/share/openclash-editor/backend.rb
 chmod 755 /usr/share/openclash-editor/update.sh
 chmod 644 /usr/share/openclash-editor/VERSION
 chmod 644 /usr/share/openclash-editor/SOURCE_URL
+chmod 644 /usr/share/openclash-editor/EDITION
 [ ! -f "$RESOLVE_IP_FILE" ] || chmod 600 "$RESOLVE_IP_FILE"
 chmod 644 /usr/lib/lua/luci/controller/openclash_editor.lua
 chmod 644 /usr/lib/lua/luci/view/openclash_editor/nodes.htm

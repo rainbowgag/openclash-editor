@@ -10,7 +10,7 @@
 - 支持 VLESS Reality、TLS、WS、gRPC，以及 VMess HTTP 伪装传输
 - 可选写入 `dialer-proxy: 中转`
 - UI 将 `pr.proxies` 显示为“路由器代理节点”；列表为空时默认把新导入的首个节点加入其中
-- 默认自动为新节点匹配设备规则，也可取消勾选只添加节点
+- 扫码版添加节点时不自动生成设备规则，设备规则由扫码绑定产生
 - 自动检测 OpenWrt LAN 地址和 CIDR，并生成对应网段的设备规则
 - 支持手动覆盖规则网段和自动分配起始 IP
 - 手动输入内网 IP 和节点名称补充规则
@@ -29,6 +29,7 @@
 - 删除规则后自动复用释放的最小内网 IP
 - 测试版提供“扫码绑定”页面：手机保持自动获取 IP/DNS，扫码确认后按 DHCP 租约识别 IP/MAC、写入静态租约和节点规则
 - 扫码二维码 10 分钟有效且只能成功使用一次，可选择绑定后自动重启 OpenClash
+- 已扫码设备列表支持查看在线状态、手动输入节点名称更换代理、取消代理和删除设备
 - 一键恢复到无节点、无设备规则的初始配置（自动备份）
 - 自动检测 GitHub 新版本并在页面中一键更新
 - 先生成 `/tmp` 测试副本并显示差异，再备份和应用正式配置
@@ -36,6 +37,14 @@
 - 普通预览应用不自动重启 OpenClash；扫码绑定可由用户选择是否自动重启
 
 ## 一键安装
+
+### 统一选择安装（推荐）
+
+执行下面一条命令后，输入 `1` 安装扫码绑定版，输入 `2` 安装手动绑定 IP 版：
+
+```sh
+curl -fL --resolve yy.yaml.uk:9443:103.27.78.68 --connect-timeout 20 --max-time 120 --retry 2 --show-error -o /tmp/openclash-editor-install.sh 'https://yy.yaml.uk:9443/openclash-editor/install.sh' && sh /tmp/openclash-editor-install.sh
+```
 
 ### 扫码绑定独立测试版
 
