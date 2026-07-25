@@ -20,18 +20,20 @@
 - 节点列表支持按名称即时搜索，规则列表支持按节点名称或内网 IP 即时搜索
 - 节点和设备规则列表支持多选、按当前搜索结果一键全选与批量删除
 - 批量删除节点时自动清理所有关联设备规则，批量删除规则不会删除节点
-- 节点管理、设备规则与预览应用分为两个独立页面
+- 节点管理、设备规则与预览应用、扫码绑定分为三个独立页面
 - 可修改已添加节点的名称，并同步修改所有关联规则
 - 删除节点时删除关联规则，或手动输入替代节点迁移规则
 - 手动修改每条规则的目标节点
 - 修改规则成功后弹出明确提示
 - 删除规则前二次确认
 - 删除规则后自动复用释放的最小内网 IP
+- 测试版提供“扫码绑定”页面：手机保持自动获取 IP/DNS，扫码确认后按 DHCP 租约识别 IP/MAC、写入静态租约和节点规则
+- 扫码二维码 10 分钟有效且只能成功使用一次，可选择绑定后自动重启 OpenClash
 - 一键恢复到无节点、无设备规则的初始配置（自动备份）
 - 自动检测 GitHub 新版本并在页面中一键更新
 - 先生成 `/tmp` 测试副本并显示差异，再备份和应用正式配置
 - 配置差异由 Ruby 后端直接生成，不依赖固件是否预装 `diff`/`diffutils`
-- 不自动重启 OpenClash
+- 普通预览应用不自动重启 OpenClash；扫码绑定可由用户选择是否自动重启
 
 ## 一键安装
 
@@ -96,6 +98,7 @@ sh -c "$(wget -qO- https://raw.githubusercontent.com/rainbowgag/openclash-editor
 - 已安装并选择 OpenClash YAML 配置；插件会从 `openclash.config.config_path` 自动识别实际文件路径和自定义文件名
 - 带 Lua 兼容层的 LuCI
 - Ruby、Ruby YAML 和 Psych（OpenClash 通常已经安装）
+- LuCI 本地二维码组件 `libluci-uqr`（测试版安装器会在缺失时给出安装提示）
 - 纯 Lua、Ruby、Shell 和浏览器 JavaScript 实现，不包含 CPU 架构相关二进制；支持 x86_64 与 ARM，已在 aarch64/ARMv8 上实机验证
 - 默认通过 `ubus network.interface.lan` 检测网段，失败时回退到 UCI
 - 支持 `/1` 至 `/30` IPv4 网段，并自动跳过路由器自身地址和重复规则 IP
@@ -117,6 +120,8 @@ sh -c "$(wget -qO- https://raw.githubusercontent.com/rainbowgag/openclash-editor
 “恢复初始配置”也会先创建 `.配置文件名.before-reset-YYYYMMDD-HHMMSS` 备份；它只清空节点、`pr.proxies` 名称和 `SRC-IP-CIDR` 设备规则，保留其他 OpenClash 配置与基础规则。
 
 应用后不会自动重启 OpenClash，避免未经确认中断当前网络。
+
+扫码绑定会在正式配置旁创建 `.配置文件名.qr-backup-YYYYMMDD-HHMMSS` 备份。只有在生成二维码时勾选“绑定后自动重启 OpenClash”，扫码确认后才会自动重启；二维码入口只接受当前 LAN 网段的访问。
 
 ## 许可证
 

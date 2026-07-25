@@ -17,6 +17,8 @@ TEST = "/tmp/openclash-editor-preview.yaml"
 PENDING_STATE = "/tmp/openclash-editor-preview-state.json"
 STATE = "/etc/openclash/openclash-editor-state.json"
 VERSION_FILE = "/usr/share/openclash-editor/VERSION"
+QR_TOKEN_DIR = "/tmp/openclash-editor-qr"
+QR_TOKEN_TTL = 600
 
 def json_generate(value)
   case value
@@ -185,6 +187,214 @@ end
 def system_architecture
   architecture = `uname -m 2>/dev/null`.strip
   architecture.empty? ? "unknown" : architecture
+end
+
+def qr_token_path(token)
+  raise "无效或已过期的二维码" unless token.to_s.match?(/\A[0-9a-f]{48}\z/)
+  File.join(QR_TOKEN_DIR, "#{token}.json")
+end
+
+def qr_create_response(node_name, reload_openclash)
+  node_name = node_name.to_s.strip
+  raise "请输入已有节点的准确名称" if node_name.empty?
+  config = load_config
+  names = Array(config["proxies"]).filter_map do |node|
+    node["name"].to_s if node.is_a?(Hash) && node["name"]
+  end
+  raise "节点不存在：#{node_name}" unless names.include?(node_name)
+
+  Dir.mkdir(QR_TOKEN_DIR, 0o700) unless Dir.exist?(QR_TOKEN_DIR)
+  File.chmod(0o700, QR_TOKEN_DIR)
+  Dir.glob(File.join(QR_TOKEN_DIR, "*")).each do |old_path|
+    File.delete(old_path) if File.file?(old_path) && File.mtime(old_path) < Time.now - QR_TOKEN_TTL
+  rescue Errno::ENOENT
+    nil
+  end
+  token = File.binread("/dev/urandom", 24).unpack1("H*")
+  expires_at = Time.now.to_i + QR_TOKEN_TTL
+  path = qr_token_path(token)
+  File.write(path, json_generate({
+    "node" => node_name,
+    "expires_at" => expires_at,
+    "reload_openclash" => reload_openclash == true
+  }))
+  File.chmod(0o600, path)
+  {
+    "ok" => true,
+    "token" => token,
+    "node" => node_name,
+    "expires_at" => expires_at,
+    "expires_in" => QR_TOKEN_TTL
+  }
+end
+
+def qr_read_token(token)
+  path = qr_token_path(token)
+  raise "二维码不存在、已经使用或已经过期" unless File.file?(path)
+  data = YAML.safe_load(File.read(path), aliases: true) || {}
+  if data["expires_at"].to_i < Time.now.to_i
+    File.delete(path)
+    raise "二维码已经过期，请在管理页面重新生成"
+  end
+  [path, data]
+end
+
+def qr_info_response(token)
+  _path, data = qr_read_token(token)
+  {
+    "ok" => true,
+    "node" => data["node"].to_s,
+    "expires_at" => data["expires_at"].to_i,
+    "reload_openclash" => data["reload_openclash"] == true
+  }
+end
+
+def lan_ip!(address)
+  address = address.to_s.sub(/\A::ffff:/, "")
+  value = ipv4_to_i(address)
+  lan = detect_lan
+  network = cidr_info(lan.fetch("cidr"))
+  raise "只能从路由器 LAN 局域网扫码绑定" unless value.between?(network["first_i"], network["last_i"])
+  raise "不能绑定路由器自身地址" if address == lan["gateway"]
+  address
+end
+
+def lookup_lan_device(address)
+  if File.file?("/tmp/dhcp.leases")
+    File.foreach("/tmp/dhcp.leases") do |line|
+      fields = line.split
+      next unless fields[2] == address
+      mac = fields[1].to_s.downcase
+      next unless mac.match?(/\A[0-9a-f]{2}(?::[0-9a-f]{2}){5}\z/)
+      return { "mac" => mac, "hostname" => fields[3].to_s }
+    end
+  end
+
+  neighbor = IO.popen(["ip", "neigh", "show", address], &:read)
+  match = neighbor.match(/\blladdr\s+([0-9a-f]{2}(?::[0-9a-f]{2}){5})\b/i)
+  raise "没有找到该手机的 DHCP 租约；请让手机保持自动获取 IP，并连接当前路由器 Wi-Fi 后重试" unless match
+  { "mac" => match[1].downcase, "hostname" => "" }
+end
+
+def dhcp_host_sections
+  output = IO.popen(["uci", "-q", "show", "dhcp"], &:read)
+  sections = Hash.new { |hash, key| hash[key] = {} }
+  output.each_line do |line|
+    match = line.match(/\Adhcp\.([^.=]+)\.(mac|ip|name)=['"]?([^'"\r\n]+)['"]?\s*\z/)
+    sections[match[1]][match[2]] = match[3] if match
+  end
+  sections
+end
+
+def reserved_ip_for_mac(mac)
+  section = dhcp_host_sections.find { |_name, values| values["mac"].to_s.downcase == mac }
+  section && section[1]["ip"].to_s.match?(/\A\d{1,3}(?:\.\d{1,3}){3}\z/) ? section[1]["ip"] : nil
+end
+
+def ensure_dhcp_reservation(mac, address, hostname)
+  sections = dhcp_host_sections
+  conflict = sections.find do |_name, values|
+    values["ip"] == address && !values["mac"].to_s.empty? && values["mac"].downcase != mac
+  end
+  raise "固定地址 #{address} 已分配给另一台设备，请先处理 DHCP 静态租约冲突" if conflict
+
+  existing = sections.find { |_name, values| values["mac"].to_s.downcase == mac }
+  return existing[0] if existing && existing[1]["ip"] == address
+  if existing && !existing[0].start_with?("oce_")
+    raise "该设备已有手动 DHCP 静态租约 #{existing[1]['ip']}，未自动覆盖用户配置"
+  end
+
+  section = "oce_#{mac.delete(':')}"
+  safe_name = hostname.to_s.gsub(/[^A-Za-z0-9_-]/, "")[0, 32]
+  safe_name = "device-#{mac.delete(':')[-6, 6]}" if safe_name.empty? || safe_name == "*"
+  system("uci", "-q", "delete", "dhcp.#{section}")
+  commands = [
+    ["uci", "set", "dhcp.#{section}=host"],
+    ["uci", "set", "dhcp.#{section}.name=#{safe_name}"],
+    ["uci", "set", "dhcp.#{section}.mac=#{mac}"],
+    ["uci", "set", "dhcp.#{section}.ip=#{address}"],
+    ["uci", "commit", "dhcp"]
+  ]
+  unless commands.all? { |command| system(*command) }
+    system("uci", "revert", "dhcp")
+    raise "写入 DHCP 静态租约失败"
+  end
+  system("/etc/init.d/dnsmasq", "reload") || raise("重新载入 DHCP 服务失败")
+  section
+end
+
+def apply_qr_rule(address, node_name)
+  config = load_config
+  names = Array(config["proxies"]).filter_map do |node|
+    node["name"].to_s if node.is_a?(Hash) && node["name"]
+  end
+  raise "二维码对应的节点已被删除：#{node_name}" unless names.include?(node_name)
+
+  rules = device_rules(config).reject do |rule|
+    parts = rule_parts(rule)
+    parts && parts["ip"] == address
+  end
+  rules.unshift("SRC-IP-CIDR,#{address}/32,#{node_name}")
+  lines = File.read(SOURCE).gsub("\r\n", "\n").split("\n", -1)
+  replace_device_rules(lines, rules)
+  generated = lines.join("\n")
+  parsed = YAML.safe_load(generated, aliases: true)
+  raise "扫码绑定生成的配置不是有效 YAML" unless parsed.is_a?(Hash)
+
+  stamp = Time.now.strftime("%Y%m%d-%H%M%S")
+  backup = File.join(File.dirname(SOURCE), ".#{File.basename(SOURCE)}.qr-backup-#{stamp}")
+  File.binwrite(backup, File.binread(SOURCE))
+  mode = File.stat(SOURCE).mode & 0o777
+  File.chmod(mode, backup)
+  staged = "#{SOURCE}.editor-qr"
+  File.write(staged, generated)
+  File.chmod(mode, staged)
+  File.rename(staged, SOURCE)
+  backup
+end
+
+def qr_bind_response(token, remote_address)
+  path, data = qr_read_token(token)
+  claimed_path = "#{path}.binding"
+  begin
+    File.rename(path, claimed_path)
+  rescue Errno::ENOENT, Errno::EEXIST
+    raise "二维码正在使用或已经使用，请重新生成"
+  end
+
+  begin
+    source_ip = lan_ip!(remote_address)
+    device = lookup_lan_device(source_ip)
+    reserved_ip = reserved_ip_for_mac(device["mac"])
+    target_ip = reserved_ip ? lan_ip!(reserved_ip) : source_ip
+    backup = apply_qr_rule(target_ip, data["node"].to_s)
+    begin
+      section = ensure_dhcp_reservation(device["mac"], target_ip, device["hostname"])
+    rescue StandardError
+      File.binwrite(SOURCE, File.binread(backup))
+      raise
+    end
+    File.delete(claimed_path)
+    reload_requested = data["reload_openclash"] == true
+    if reload_requested
+      system("sh", "-c", "(sleep 2; /etc/init.d/openclash restart) >/tmp/openclash-editor-qr-restart.log 2>&1 &")
+    end
+    {
+      "ok" => true,
+      "node" => data["node"].to_s,
+      "ip" => target_ip,
+      "source_ip" => source_ip,
+      "mac" => device["mac"],
+      "hostname" => device["hostname"],
+      "dhcp_section" => section,
+      "backup" => backup,
+      "reload_openclash" => reload_requested,
+      "reconnect_required" => target_ip != source_ip
+    }
+  rescue StandardError
+    File.rename(claimed_path, path) if File.file?(claimed_path) && !File.exist?(path)
+    raise
+  end
 end
 
 def change_summary(config, nodes, rules, anchor_names)
@@ -419,6 +629,9 @@ if __FILE__ == $PROGRAM_NAME
              when "state" then state_response
              when "preview" then preview_response(ARGV.fetch(1))
              when "reset" then reset_response
+             when "qr-create" then qr_create_response(ARGV.fetch(1), ARGV[2] == "1")
+             when "qr-info" then qr_info_response(ARGV.fetch(1))
+             when "qr-bind" then qr_bind_response(ARGV.fetch(1), ARGV.fetch(2))
              else raise "未知操作"
              end
     puts json_generate(result)

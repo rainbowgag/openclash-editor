@@ -31,6 +31,11 @@ if [ ! -d /usr/lib/lua/luci/controller ] || [ ! -d /usr/lib/lua/luci/view ]; the
   exit 1
 fi
 
+if [ ! -f /www/luci-static/resources/uqr.js ]; then
+  echo "错误：当前 LuCI 缺少本地二维码组件，请先执行：opkg update && opkg install libluci-uqr" >&2
+  exit 1
+fi
+
 fetch_file() {
   url="$1"
   destination="$2"
@@ -60,6 +65,7 @@ fetch_file "$BASE_URL/update.sh" "/usr/share/openclash-editor/update.sh"
 fetch_file "$BASE_URL/luci/controller/openclash_editor.lua" "/usr/lib/lua/luci/controller/openclash_editor.lua"
 fetch_file "$BASE_URL/luci/view/openclash_editor/nodes.htm" "/usr/lib/lua/luci/view/openclash_editor/nodes.htm"
 fetch_file "$BASE_URL/luci/view/openclash_editor/rules.htm" "/usr/lib/lua/luci/view/openclash_editor/rules.htm"
+fetch_file "$BASE_URL/luci/view/openclash_editor/qr.htm" "/usr/lib/lua/luci/view/openclash_editor/qr.htm"
 fetch_file "$BASE_URL/www/converter.js" "/www/luci-static/resources/openclash-editor/converter.js"
 fetch_file "$BASE_URL/www/editor-common.js" "/www/luci-static/resources/openclash-editor/editor-common.js"
 fetch_file "$BASE_URL/www/editor.css" "/www/luci-static/resources/openclash-editor/editor.css"
@@ -72,6 +78,7 @@ chmod 644 /usr/share/openclash-editor/SOURCE_URL
 chmod 644 /usr/lib/lua/luci/controller/openclash_editor.lua
 chmod 644 /usr/lib/lua/luci/view/openclash_editor/nodes.htm
 chmod 644 /usr/lib/lua/luci/view/openclash_editor/rules.htm
+chmod 644 /usr/lib/lua/luci/view/openclash_editor/qr.htm
 chmod 644 /www/luci-static/resources/openclash-editor/converter.js
 chmod 644 /www/luci-static/resources/openclash-editor/editor-common.js
 chmod 644 /www/luci-static/resources/openclash-editor/editor.css

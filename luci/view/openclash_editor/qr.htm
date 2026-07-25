@@ -1,0 +1,106 @@
+<%+header%>
+<link rel="stylesheet" href="<%=resource%>/openclash-editor/editor.css?v=1.7.0-test.1">
+<style>
+  .oce-qr-grid{display:grid;grid-template-columns:minmax(300px,1fr) minmax(300px,1fr);gap:20px}
+  .oce-qr-output{min-height:360px;display:flex;align-items:center;justify-content:center;flex-direction:column;text-align:center}
+  .oce-qr-output svg{width:min(320px,85vw);height:auto;max-width:100%;border:12px solid #fff;border-radius:12px;box-shadow:0 8px 28px #15254b22}
+  .oce-qr-url{max-width:100%;word-break:break-all;margin-top:16px}
+  .oce-step{padding:12px 15px;margin:10px 0;border-radius:10px;background:#edf4ff;color:#17366c;font-weight:600}
+  @media(max-width:850px){.oce-qr-grid{grid-template-columns:1fr}}
+</style>
+<div class="oce-shell">
+  <div class="oce-hero"><div><h2>手机扫码绑定</h2><p>自动识别手机 IP 与 MAC · 固定 DHCP 地址 · 写入节点规则</p></div><div class="oce-hero-actions"><span id="version" class="oce-version"></span></div></div>
+  <div class="oce-nav">
+    <a href="<%=luci.dispatcher.build_url('admin','services','openclash','visual-editor')%>">① 节点管理</a>
+    <a href="<%=luci.dispatcher.build_url('admin','services','openclash','visual-editor-rules')%>">② 设备规则与应用</a>
+    <a class="active" href="<%=luci.dispatcher.build_url('admin','services','openclash','visual-editor-qr')%>">③ 扫码绑定</a>
+  </div>
+  <div id="status" class="oce-status"></div>
+
+  <div class="oce-qr-grid">
+    <section class="oce-card oce-user">
+      <h3>为节点生成一次性二维码</h3>
+      <div class="oce-step">1. 手机连接当前路由器 Wi-Fi，并保持“自动获取 IP / DNS”</div>
+      <div class="oce-step">2. 输入正式配置中已有的节点名称，生成二维码</div>
+      <div class="oce-step">3. 手机扫码打开页面，再点“确认绑定这台设备”</div>
+      <label class="oce-field" style="display:block;margin-top:18px">目标节点名称
+        <input id="node_name" class="oce-input" list="node_names" autocomplete="off" placeholder="准确输入已有节点名称">
+      </label>
+      <datalist id="node_names"></datalist>
+      <label class="oce-check-label" style="margin-top:18px">
+        <input id="reload_openclash" class="oce-check" type="checkbox" checked>
+        绑定后自动重启 OpenClash，使规则立即生效
+      </label>
+      <div class="oce-actions" style="margin-top:20px">
+        <button id="generate" class="btn cbi-button cbi-button-action" type="button">生成二维码</button>
+        <button id="clear" class="btn cbi-button" type="button">清除二维码</button>
+      </div>
+      <p class="oce-muted">二维码 10 分钟内有效且只能成功使用一次。手机的“私有 Wi-Fi 地址”须保持固定，不要每次连接都随机更换。</p>
+    </section>
+
+    <section class="oce-card oce-system oce-qr-output">
+      <div id="placeholder">
+        <h3>二维码会显示在这里</h3>
+        <p class="oce-muted">生成后请直接用需要绑定的手机扫码。</p>
+      </div>
+      <div id="qr" style="display:none"></div>
+      <strong id="expires" style="display:none;margin-top:14px"></strong>
+      <code id="qr_url" class="oce-qr-url" style="display:none"></code>
+    </section>
+  </div>
+
+  <section class="oce-card oce-system">
+    <h3>绑定行为</h3>
+    <p>扫码确认后，路由器会根据访问来源查找 DHCP 租约，把当前地址固定给这台手机，并新增或替换对应的 <code>SRC-IP-CIDR,手机IP/32,节点名称</code> 规则。修改正式 YAML 前会自动创建 <code>.qr-backup-时间</code> 备份。</p>
+  </section>
+</div>
+<script src="<%=resource%>/openclash-editor/editor-common.js?v=1.7.0-test.1"></script>
+<script>
+(function(){
+  var E=OpenClashEditor;
+  var urls={
+    state:'<%=luci.dispatcher.build_url("admin","services","openclash","visual-editor-state")%>',
+    create:'<%=luci.dispatcher.build_url("admin","services","openclash","visual-editor-qr-create")%>',
+    bind:'<%=luci.dispatcher.build_url("openclash-editor-bind")%>'
+  };
+  var timer=null;
+  function el(id){return document.getElementById(id)}
+  function msg(text,type){var x=el('status');x.textContent=text;x.className='oce-status '+(type==='ok'?'oce-ok':type==='warn'?'oce-warn':'oce-error')}
+  function clearQr(){
+    if(timer){clearInterval(timer);timer=null}
+    el('qr').innerHTML='';el('qr').style.display='none';el('expires').style.display='none';el('qr_url').style.display='none';el('placeholder').style.display='';
+  }
+  function countdown(until){
+    function update(){var left=Math.max(0,Math.ceil(until-Date.now()/1000));el('expires').textContent=left?'剩余有效时间：'+left+' 秒':'二维码已过期，请重新生成';if(!left&&timer){clearInterval(timer);timer=null}}
+    update();timer=setInterval(update,1000);
+  }
+  function drawQr(url){
+    return L.require('uqr').then(function(Uqr){
+      var renderer=new Uqr();
+      el('qr').innerHTML=renderer.renderSVG(url,{pixelSize:7,border:4,ecc:'M'});
+    });
+  }
+  el('generate').onclick=function(){
+    var button=this,node=el('node_name').value.trim();
+    if(!node){msg('请输入正式配置中已有的节点名称','warn');return}
+    button.disabled=true;clearQr();
+    E.post(urls.create,{node:node,reload:el('reload_openclash').checked?'1':'0'}).then(function(result){
+      if(!result.ok)throw new Error(result.error+(result.details?'\n'+result.details:''));
+      var url=location.protocol+'//'+location.host+urls.bind+'?token='+encodeURIComponent(result.token);
+      return drawQr(url).then(function(){
+        el('placeholder').style.display='none';el('qr').style.display='';el('expires').style.display='';el('qr_url').style.display='';el('qr_url').textContent=url;
+        countdown(result.expires_at);msg('二维码已生成，请使用要绑定的手机扫码','ok');
+      });
+    }).catch(function(error){msg('生成失败：'+error.message,'error')}).then(function(){button.disabled=false});
+  };
+  el('clear').onclick=function(){clearQr();msg('页面上的二维码已清除；未使用的令牌会在 10 分钟后自动失效','warn')};
+  E.get(urls.state).then(function(state){
+    if(!state.ok)throw new Error(state.error||'读取节点失败');
+    el('version').textContent='测试版 '+state.version;
+    el('node_names').innerHTML=(state.nodes||[]).map(function(node){return '<option value="'+E.esc(node.name)+'"></option>'}).join('');
+    if(state.nodes&&state.nodes.length===1)el('node_name').value=state.nodes[0].name;
+    msg('已读取 '+(state.nodes||[]).length+' 个正式配置节点','ok');
+  }).catch(function(error){msg(error.message,'error')});
+})();
+</script>
+<%+footer%>

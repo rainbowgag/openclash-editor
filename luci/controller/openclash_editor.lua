@@ -4,6 +4,7 @@ local http = require "luci.http"
 local json = require "luci.jsonc"
 local fs = require "nixio.fs"
 local sys = require "luci.sys"
+local util = require "luci.util"
 local uci_model = require "luci.model.uci"
 
 local test_path = "/tmp/openclash-editor-preview.yaml"
@@ -42,12 +43,18 @@ function index()
 		template("openclash_editor/rules"), _("Rule Editor"), 86)
 	rules_page.leaf = true
 	rules_page.acl_depends = { "luci-app-openclash" }
+	local qr_page = entry({"admin", "services", "openclash", "visual-editor-qr"},
+		template("openclash_editor/qr"), _("扫码绑定"), 87)
+	qr_page.leaf = true
+	qr_page.acl_depends = { "luci-app-openclash" }
 	entry({"admin", "services", "openclash", "visual-editor-state"}, call("action_state")).leaf = true
 	entry({"admin", "services", "openclash", "visual-editor-preview"}, call("action_preview")).leaf = true
 	entry({"admin", "services", "openclash", "visual-editor-apply"}, call("action_apply")).leaf = true
 	entry({"admin", "services", "openclash", "visual-editor-reset"}, call("action_reset")).leaf = true
 	entry({"admin", "services", "openclash", "visual-editor-update-check"}, call("action_update_check")).leaf = true
 	entry({"admin", "services", "openclash", "visual-editor-update"}, call("action_update")).leaf = true
+	entry({"admin", "services", "openclash", "visual-editor-qr-create"}, call("action_qr_create")).leaf = true
+	entry({"openclash-editor-bind"}, call("action_qr_bind")).leaf = true
 end
 
 local function reply(ok, data)
@@ -89,6 +96,77 @@ end
 function action_state()
 	local ok, err = xpcall(state_impl, debug.traceback)
 	if not ok then reply(false, { error = "读取配置失败", details = err }) end
+end
+
+local function qr_create_impl()
+	local node_name = (http.formvalue("node") or ""):gsub("^%s+", ""):gsub("%s+$", "")
+	if node_name == "" then return reply(false, { error = "请输入已有节点名称" }) end
+	if #node_name > 256 then return reply(false, { error = "节点名称过长" }) end
+	local reload_openclash = http.formvalue("reload") == "1" and "1" or "0"
+	local result, err, details = run_backend("qr-create " .. shellquote(node_name) .. " " .. reload_openclash)
+	if not result then return reply(false, { error = err, details = details }) end
+	if not result.ok then return reply(false, result) end
+	reply(true, result)
+end
+
+function action_qr_create()
+	if not require_post() then return end
+	local ok, err = xpcall(qr_create_impl, debug.traceback)
+	if not ok then reply(false, { error = "生成二维码失败", details = err }) end
+end
+
+local function qr_bind_page(title, body, tone)
+	local color = tone == "ok" and "#08783e" or tone == "warn" and "#9a5a00" or "#b42318"
+	http.prepare_content("text/html; charset=utf-8")
+	http.write("<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">")
+	http.write("<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">")
+	http.write("<title>" .. util.pcdata(title) .. "</title>")
+	http.write("<style>body{margin:0;background:#f4f7fb;color:#15254b;font:16px/1.65 sans-serif}.box{max-width:560px;margin:9vh auto;padding:28px;background:#fff;border-radius:18px;box-shadow:0 12px 40px #15254b22}.state{border-left:6px solid " .. color .. ";padding-left:18px}h1{font-size:26px;margin:0 0 16px}.btn{display:block;width:100%;box-sizing:border-box;margin-top:24px;padding:15px;border:0;border-radius:10px;background:#2867e8;color:#fff;font-weight:700;font-size:17px}code{word-break:break-all}</style>")
+	http.write("</head><body><main class=\"box\"><div class=\"state\"><h1>" .. util.pcdata(title) .. "</h1>" .. body .. "</div></main></body></html>")
+end
+
+local function qr_bind_impl()
+	local token = http.formvalue("token") or ""
+	if not token:match("^[0-9a-f]+$") or #token ~= 48 then
+		return qr_bind_page("二维码无效", "<p>链接格式不正确，请返回管理页面重新生成。</p>", "error")
+	end
+
+	if http.getenv("REQUEST_METHOD") ~= "POST" then
+		local result, err, details = run_backend("qr-info " .. shellquote(token))
+		if not result or not result.ok then
+			local message = result and result.error or err or details or "二维码不可用"
+			return qr_bind_page("二维码不可用", "<p>" .. util.pcdata(message) .. "</p>", "error")
+		end
+		local reload_text = result.reload_openclash and
+			"<p>确认后会写入固定 DHCP 租约和设备规则，并自动重启 OpenClash 使规则生效。</p>" or
+			"<p>确认后会写入固定 DHCP 租约和设备规则；需要稍后手动重新载入 OpenClash。</p>"
+		local form = "<p>目标节点：<strong>" .. util.pcdata(result.node) .. "</strong></p>" ..
+			reload_text ..
+			"<form method=\"post\"><input type=\"hidden\" name=\"token\" value=\"" .. util.pcdata(token) .. "\">" ..
+			"<button class=\"btn\" type=\"submit\">确认绑定这台设备</button></form>"
+		return qr_bind_page("扫码绑定设备", form, "warn")
+	end
+
+	local remote_address = http.getenv("REMOTE_ADDR") or ""
+	local result, err, details = run_backend("qr-bind " .. shellquote(token) .. " " .. shellquote(remote_address))
+	if not result or not result.ok then
+		local message = result and result.error or err or details or "绑定失败"
+		return qr_bind_page("绑定失败", "<p>" .. util.pcdata(message) .. "</p>", "error")
+	end
+	local next_step = result.reload_openclash and
+		"<p>OpenClash 正在后台重启，网络可能短暂中断，请等待约 30 秒。</p>" or
+		"<p>请在 OpenClash 中重新载入配置后生效。</p>"
+	if result.reconnect_required then
+		next_step = next_step .. "<p>该设备已有固定地址，请断开并重新连接一次 Wi-Fi。</p>"
+	end
+	local body = "<p>设备 <code>" .. util.pcdata(result.mac) .. "</code> 已绑定到：</p>" ..
+		"<p><strong>" .. util.pcdata(result.node) .. "</strong>（" .. util.pcdata(result.ip) .. "/32）</p>" .. next_step
+	qr_bind_page("绑定成功", body, "ok")
+end
+
+function action_qr_bind()
+	local ok, err = xpcall(qr_bind_impl, debug.traceback)
+	if not ok then qr_bind_page("绑定失败", "<p>" .. util.pcdata(err) .. "</p>", "error") end
 end
 
 local function preview_impl()

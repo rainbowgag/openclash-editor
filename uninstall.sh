@@ -15,9 +15,11 @@ rm -f /usr/lib/lua/luci/controller/openclash_editor.lua
 rm -f /usr/lib/lua/luci/view/openclash_editor/index.htm
 rm -f /usr/lib/lua/luci/view/openclash_editor/nodes.htm
 rm -f /usr/lib/lua/luci/view/openclash_editor/rules.htm
+rm -f /usr/lib/lua/luci/view/openclash_editor/qr.htm
 rm -f /www/luci-static/resources/openclash-editor/converter.js
 rm -f /www/luci-static/resources/openclash-editor/editor-common.js
 rm -f /www/luci-static/resources/openclash-editor/editor.css
+rm -rf /tmp/openclash-editor-qr
 rm -f /tmp/luci-indexcache 2>/dev/null || true
 rm -f /tmp/luci-modulecache/* 2>/dev/null || true
 
