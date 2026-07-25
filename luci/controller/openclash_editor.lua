@@ -33,6 +33,17 @@ local function shellquote(value)
 	return "'" .. tostring(value):gsub("'", "'\\''") .. "'"
 end
 
+local function schedule_openclash_restart()
+	if not fs.access("/etc/init.d/openclash") then
+		return false, "未找到 /etc/init.d/openclash"
+	end
+	local command = "(sleep 2; /etc/init.d/openclash restart) >/tmp/openclash-editor-restart.log 2>&1 &"
+	if sys.call("sh -c " .. shellquote(command)) ~= 0 then
+		return false, "无法启动 OpenClash 后台重启任务"
+	end
+	return true
+end
+
 function index()
 	if not fs.access(get_source_path()) then return end
 	local page = entry({"admin", "services", "openclash", "visual-editor"},
@@ -50,6 +61,7 @@ function index()
 	entry({"admin", "services", "openclash", "visual-editor-state"}, call("action_state")).leaf = true
 	entry({"admin", "services", "openclash", "visual-editor-preview"}, call("action_preview")).leaf = true
 	entry({"admin", "services", "openclash", "visual-editor-apply"}, call("action_apply")).leaf = true
+	entry({"admin", "services", "openclash", "visual-editor-restart"}, call("action_restart")).leaf = true
 	entry({"admin", "services", "openclash", "visual-editor-reset"}, call("action_reset")).leaf = true
 	entry({"admin", "services", "openclash", "visual-editor-update-check"}, call("action_update_check")).leaf = true
 	entry({"admin", "services", "openclash", "visual-editor-update"}, call("action_update")).leaf = true
@@ -284,13 +296,31 @@ local function apply_impl()
 	end
 	fs.remove(token_path)
 	fs.remove(preview_source_path)
-	reply(true, { message = "配置已应用，但尚未重启 OpenClash", backup = backup })
+	local restart_ok, restart_error = schedule_openclash_restart()
+	if not restart_ok then
+		return reply(true, {
+			message = "配置已应用，但 OpenClash 重启任务启动失败",
+			warning = restart_error,
+			backup = backup
+		})
+	end
+	reply(true, { message = "配置已应用，OpenClash 正在后台重启", backup = backup })
 end
 
 function action_apply()
 	if not require_post() then return end
 	local ok, err = xpcall(apply_impl, debug.traceback)
 	if not ok then reply(false, { error = "后端执行异常", details = err }) end
+end
+
+function action_restart()
+	if not require_post() then return end
+	local ok, err = xpcall(function()
+		local restart_ok, restart_error = schedule_openclash_restart()
+		if not restart_ok then return reply(false, { error = restart_error }) end
+		reply(true, { message = "OpenClash 正在后台重启" })
+	end, debug.traceback)
+	if not ok then reply(false, { error = "重启 OpenClash 失败", details = err }) end
 end
 
 local function reset_impl()

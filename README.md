@@ -34,7 +34,7 @@
 - 自动检测 GitHub 新版本并在页面中一键更新
 - 先生成 `/tmp` 测试副本并显示差异，再备份和应用正式配置
 - 配置差异由 Ruby 后端直接生成，不依赖固件是否预装 `diff`/`diffutils`
-- 普通预览应用不自动重启 OpenClash；扫码绑定可由用户选择是否自动重启
+- 预览确认并应用正式配置后自动重启 OpenClash；扫码绑定是否立即重启由用户选择，默认不勾选
 
 ## 一键安装
 
@@ -136,9 +136,9 @@ sh -c "$(wget -qO- https://raw.githubusercontent.com/rainbowgag/openclash-editor
 
 “恢复初始配置”也会先创建 `.配置文件名.before-reset-YYYYMMDD-HHMMSS` 备份；它只清空节点、`pr.proxies` 名称和 `SRC-IP-CIDR` 设备规则，保留其他 OpenClash 配置与基础规则。
 
-应用后不会自动重启 OpenClash，避免未经确认中断当前网络。
+应用正式配置后会延迟启动 OpenClash 后台重启任务，使新规则生效并确保页面先收到成功响应。
 
-扫码绑定会在正式配置旁创建 `.配置文件名.qr-backup-YYYYMMDD-HHMMSS` 备份。只有在生成二维码时勾选“绑定后自动重启 OpenClash”，扫码确认后才会自动重启；二维码入口只接受当前 LAN 网段的访问。
+扫码绑定会在正式配置旁创建 `.配置文件名.qr-backup-YYYYMMDD-HHMMSS` 备份。“绑定后自动重启 OpenClash”默认不勾选；需要立即生效时可主动勾选，或在扫码页面底部点击“应用配置”统一重启。二维码入口只接受当前 LAN 网段的访问。
 
 ## 许可证
 

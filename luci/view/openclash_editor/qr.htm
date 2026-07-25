@@ -1,5 +1,5 @@
 <%+header%>
-<link rel="stylesheet" href="<%=resource%>/openclash-editor/editor.css?v=1.7.0-test.6">
+<link rel="stylesheet" href="<%=resource%>/openclash-editor/editor.css?v=1.7.0-test.7">
 <style>
   .oce-qr-grid{display:grid;grid-template-columns:minmax(300px,1fr) minmax(300px,1fr);gap:20px}
   .oce-qr-output{min-height:360px;display:flex;align-items:center;justify-content:center;flex-direction:column;text-align:center}
@@ -30,7 +30,7 @@
       </label>
       <datalist id="node_names"></datalist>
       <label class="oce-check-label" style="margin-top:18px">
-        <input id="reload_openclash" class="oce-check" type="checkbox" checked>
+        <input id="reload_openclash" class="oce-check" type="checkbox">
         绑定后自动重启 OpenClash，使规则立即生效
       </label>
       <div class="oce-actions" style="margin-top:20px">
@@ -72,9 +72,12 @@
   <section class="oce-card oce-system">
     <h3>绑定行为</h3>
     <p>扫码确认后，路由器会根据访问来源查找 DHCP 租约，把当前地址固定给这台手机，并新增或替换对应的 <code>SRC-IP-CIDR,手机IP/32,节点名称</code> 规则。修改正式 YAML 前会自动创建 <code>.qr-backup-时间</code> 备份。</p>
+    <div class="cbi-page-actions">
+      <button id="apply_config" class="btn cbi-button cbi-button-apply" type="button">应用配置</button>
+    </div>
   </section>
 </div>
-<script src="<%=resource%>/openclash-editor/editor-common.js?v=1.7.0-test.6"></script>
+<script src="<%=resource%>/openclash-editor/editor-common.js?v=1.7.0-test.7"></script>
 <script>
 (function(){
   var E=OpenClashEditor;
@@ -85,6 +88,7 @@
     change:'<%=luci.dispatcher.build_url("admin","services","openclash","visual-editor-qr-change")%>',
     unproxy:'<%=luci.dispatcher.build_url("admin","services","openclash","visual-editor-qr-unproxy")%>',
     remove:'<%=luci.dispatcher.build_url("admin","services","openclash","visual-editor-qr-delete")%>',
+    restart:'<%=luci.dispatcher.build_url("admin","services","openclash","visual-editor-restart")%>',
     bind:'<%=luci.dispatcher.build_url("oeb")%>'
   };
   var timer=null,devices=[],knownNodes=[];
@@ -159,6 +163,18 @@
   };
   el('refresh_devices').onclick=loadDevices;
   el('device_search').oninput=renderDevices;
+  el('apply_config').onclick=function(){
+    if(!confirm('确认应用当前正式配置并重启 OpenClash？\n网络可能会短暂中断。'))return;
+    var button=this;button.disabled=true;
+    E.post(urls.restart,{}).then(function(result){
+      if(!result.ok)throw new Error(result.error+(result.details?'\n'+result.details:''));
+      alert('配置已应用！OpenClash 正在后台重启。');
+      msg('配置已应用，OpenClash 正在后台重启','ok');
+    }).catch(function(error){
+      msg('应用配置失败：'+error.message,'error');
+      button.disabled=false;
+    });
+  };
   el('device_body').onclick=function(event){
     var row=event.target.closest('tr[data-mac]');if(!row)return;
     var mac=row.getAttribute('data-mac'),input=row.querySelector('.oce-device-node'),node=input?input.value.trim():'';
