@@ -127,7 +127,13 @@ local function qr_bind_page(title, body, tone)
 end
 
 local function qr_bind_impl()
-	local token = http.formvalue("t") or http.formvalue("token") or ""
+	local token = http.formvalue("t")
+	if type(token) == "table" then token = token[1] end
+	if type(token) ~= "string" or token == "" then
+		token = http.formvalue("token")
+		if type(token) == "table" then token = token[1] end
+	end
+	if type(token) ~= "string" then token = "" end
 	if not token:match("^[0-9a-f]+$") or #token ~= 32 then
 		return qr_bind_page("二维码无效", "<p>链接格式不正确，请返回管理页面重新生成。</p>", "error")
 	end
@@ -143,7 +149,7 @@ local function qr_bind_impl()
 			"<p>确认后会写入固定 DHCP 租约和设备规则；需要稍后手动重新载入 OpenClash。</p>"
 		local form = "<p>目标节点：<strong>" .. util.pcdata(result.node) .. "</strong></p>" ..
 			reload_text ..
-			"<form method=\"post\"><input type=\"hidden\" name=\"t\" value=\"" .. util.pcdata(token) .. "\">" ..
+			"<form method=\"post\"><input type=\"hidden\" name=\"token\" value=\"" .. util.pcdata(token) .. "\">" ..
 			"<button class=\"btn\" type=\"submit\">确认绑定这台设备</button></form>"
 		return qr_bind_page("扫码绑定设备", form, "warn")
 	end
