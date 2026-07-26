@@ -1,5 +1,5 @@
 <%+header%>
-<link rel="stylesheet" href="<%=resource%>/openclash-editor/editor.css?v=2.0.2">
+<link rel="stylesheet" href="<%=resource%>/openclash-editor/editor.css?v=2.1.0">
 <style>
   .oce-slot-grid{display:grid;grid-template-columns:minmax(340px,1fr) minmax(320px,1fr);gap:20px}
   .oce-slot-create{display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:14px;align-items:end}
@@ -8,6 +8,7 @@
   .oce-slot-url{max-width:100%;word-break:break-all;margin-top:14px}
   .oce-slot-node{min-width:190px}
   .oce-online{color:#08783e;font-weight:700}.oce-offline{color:#7a879e;font-weight:700}
+  .oce-locked{color:#9a5a00;font-weight:700}.oce-unlocked{color:#b42318;font-weight:700}
   @media(max-width:960px){.oce-slot-grid{grid-template-columns:1fr}.oce-slot-create{grid-template-columns:1fr 1fr}}
   @media(max-width:560px){.oce-slot-create{grid-template-columns:1fr}}
 </style>
@@ -92,13 +93,13 @@
 
   <section class="oce-card oce-system">
     <h3>扫码绑定说明</h3>
-    <p>手机保持自动获取 IP / DNS，连接当前路由器 Wi-Fi 后扫描槽位二维码并确认。路由器会把槽位固定 IP 改绑到该手机当前 MAC；刷机后用同一槽位二维码重新绑定即可，不需要删除旧设备记录。</p>
+    <p>手机保持自动获取 IP / DNS，连接当前路由器 Wi-Fi 后扫描槽位二维码并确认。首次绑定后槽位会自动锁定，其他手机不能直接替换；刷机或更换手机时，请先在槽位列表点击“允许换绑”，再于10分钟内扫描同一二维码。</p>
     <div class="cbi-page-actions">
       <button id="apply_config" class="btn cbi-button cbi-button-apply" type="button">应用配置</button>
     </div>
   </section>
 </div>
-<script src="<%=resource%>/openclash-editor/editor-common.js?v=2.0.2"></script>
+<script src="<%=resource%>/openclash-editor/editor-common.js?v=2.1.0"></script>
 <script>
 (function(){
   var E=OpenClashEditor;
@@ -109,6 +110,7 @@
     createMany:'<%=luci.dispatcher.build_url("admin","services","openclash","visual-editor-slots-create-many")%>',
     update:'<%=luci.dispatcher.build_url("admin","services","openclash","visual-editor-slot-update")%>',
     regenerate:'<%=luci.dispatcher.build_url("admin","services","openclash","visual-editor-slot-regenerate")%>',
+    rebind:'<%=luci.dispatcher.build_url("admin","services","openclash","visual-editor-slot-rebind")%>',
     remove:'<%=luci.dispatcher.build_url("admin","services","openclash","visual-editor-slot-delete")%>',
     removeBulk:'<%=luci.dispatcher.build_url("admin","services","openclash","visual-editor-slots-delete")%>',
     restart:'<%=luci.dispatcher.build_url("admin","services","openclash","visual-editor-restart")%>',
@@ -119,7 +121,9 @@
   function msg(text,type){var x=el('status');x.textContent=text;x.className='oce-status '+(type==='ok'?'oce-ok':type==='warn'?'oce-warn':'oce-error')}
   function slotRow(slot){
     var status=slot.online?'<span class="oce-online">在线</span>':'<span class="oce-offline">离线</span>';
-    var device=slot.mac?('<strong>'+E.esc(slot.device_name||'已绑定设备')+'</strong><div class="oce-muted">'+E.esc(slot.mac)+'</div><div>'+status+(slot.current_ip?' · 当前 '+E.esc(slot.current_ip):'')+'</div>'):'<span class="oce-muted">等待设备扫码</span>';
+    var lock=slot.mac?(slot.rebind_allowed?'<div class="oce-unlocked">允许换绑（约 '+Math.max(1,Math.ceil(Number(slot.rebind_remaining||0)/60))+' 分钟）</div>':'<div class="oce-locked">🔒 已锁定</div>'):'';
+    var device=slot.mac?('<strong>'+E.esc(slot.device_name||'已绑定设备')+'</strong><div class="oce-muted">'+E.esc(slot.mac)+'</div><div>'+status+(slot.current_ip?' · 当前 '+E.esc(slot.current_ip):'')+'</div>'+lock):'<span class="oce-muted">等待首次扫码，绑定后自动锁定</span>';
+    var rebindButton=slot.mac?('<button class="btn cbi-button '+(slot.rebind_allowed?'oce-danger':'cbi-button-positive')+' slot-rebind" type="button">'+(slot.rebind_allowed?'取消换绑':'允许换绑')+'</button> '):'';
     var warning=slot.rule_ok?'':'<div class="oce-error" style="margin-top:5px">规则缺失或节点不一致</div>';
     return '<tr data-id="'+E.esc(slot.id)+'">'+
       '<td><input class="slot-select oce-check" data-id="'+E.esc(slot.id)+'" type="checkbox" '+(selectedSlots[slot.id]?'checked':'')+' aria-label="选择槽位 '+E.esc(slot.name)+'"></td>'+
@@ -127,6 +131,7 @@
       '<td>'+device+'</td>'+
       '<td><input class="oce-input oce-slot-node" list="node_names" value="'+E.esc(slot.node||'')+'" placeholder="已有节点名称"> <button class="btn cbi-button slot-update" type="button">修改</button></td>'+
       '<td><button class="btn cbi-button cbi-button-action slot-show" type="button">显示二维码</button> '+
+      rebindButton+
       '<button class="btn cbi-button slot-regenerate" type="button">重置二维码</button> '+
       '<button class="btn cbi-button oce-danger slot-delete" type="button">删除</button></td></tr>';
   }
@@ -216,7 +221,16 @@
     var row=event.target.closest('tr[data-id]');if(!row)return;
     var id=row.getAttribute('data-id'),slot=slots.find(function(item){return item.id===id});if(!slot)return;
     if(event.target.classList.contains('slot-show')){showQr(slot);return}
-    if(event.target.classList.contains('slot-update')){
+    if(event.target.classList.contains('slot-rebind')){
+      var allow=!slot.rebind_allowed;
+      var question=allow?('允许其他手机在10分钟内替换“'+slot.name+'”当前绑定的设备？\n成功换绑后会立即重新锁定。'):('立即取消“'+slot.name+'”的换绑授权？');
+      if(!confirm(question))return;
+      event.target.disabled=true;
+      E.post(urls.rebind,{id:id,enabled:allow?'1':'0'}).then(function(result){
+        if(!result.ok)throw new Error(result.error+(result.details?'\n'+result.details:''));
+        alert(allow?'已允许换绑，请让新手机在10分钟内扫描该槽位二维码。':'已取消换绑授权，槽位重新锁定。');return loadSlots();
+      }).catch(function(error){msg('修改换绑授权失败：'+error.message,'error');event.target.disabled=false});
+    }else if(event.target.classList.contains('slot-update')){
       var node=row.querySelector('.oce-slot-node').value.trim();
       if(knownNodes.indexOf(node)<0){msg('节点名称不存在，请准确输入正式配置中的已有节点名称','error');return}
       E.post(urls.update,{id:id,node:node}).then(function(result){

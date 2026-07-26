@@ -74,6 +74,7 @@ function index()
 	entry({"admin", "services", "openclash", "visual-editor-slots-plan"}, call("action_slots_plan")).leaf = true
 	entry({"admin", "services", "openclash", "visual-editor-slot-update"}, call("action_slot_update")).leaf = true
 	entry({"admin", "services", "openclash", "visual-editor-slot-regenerate"}, call("action_slot_regenerate")).leaf = true
+	entry({"admin", "services", "openclash", "visual-editor-slot-rebind"}, call("action_slot_rebind")).leaf = true
 	entry({"admin", "services", "openclash", "visual-editor-slot-delete"}, call("action_slot_delete")).leaf = true
 	entry({"admin", "services", "openclash", "visual-editor-slots-delete"}, call("action_slots_delete")).leaf = true
 	entry({"openclash-editor-bind"}, call("action_qr_bind")).leaf = true
@@ -315,6 +316,25 @@ function action_slot_regenerate()
 	if not ok then reply(false, { error = "重置扫码槽位二维码失败", details = err }) end
 end
 
+function action_slot_rebind()
+	if not require_post() then return end
+	local ok, err = xpcall(function()
+		local id = http.formvalue("id") or ""
+		local enabled = http.formvalue("enabled") or ""
+		if type(id) ~= "string" or not id:match("^[0-9a-f]+$") or #id ~= 12 then
+			return reply(false, { error = "扫码槽位编号无效" })
+		end
+		if enabled ~= "0" and enabled ~= "1" then
+			return reply(false, { error = "换绑授权参数无效" })
+		end
+		local result, backend_err, details = run_backend("slot-rebind " .. shellquote(id) .. " " .. shellquote(enabled))
+		if not result then return reply(false, { error = backend_err, details = details }) end
+		if not result.ok then return reply(false, result) end
+		reply(true, result)
+	end, debug.traceback)
+	if not ok then reply(false, { error = "修改换绑授权失败", details = err }) end
+end
+
 function action_slot_delete()
 	local ok, err = xpcall(function() slot_id_action("slot-delete", false) end, debug.traceback)
 	if not ok then reply(false, { error = "删除扫码槽位失败", details = err }) end
@@ -359,7 +379,8 @@ local function qr_bind_impl()
 	end
 
 	if http.getenv("REQUEST_METHOD") ~= "POST" then
-		local result, err, details = run_backend("slot-info " .. shellquote(token))
+		local remote_address = http.getenv("REMOTE_ADDR") or ""
+		local result, err, details = run_backend("slot-info " .. shellquote(token) .. " " .. shellquote(remote_address))
 		if not result or not result.ok then
 			local message = result and result.error or err or details or "二维码不可用"
 			return qr_bind_page("二维码不可用", "<p>" .. util.pcdata(message) .. "</p>", "error")
@@ -368,11 +389,27 @@ local function qr_bind_impl()
 		local bound = slot.mac and slot.mac ~= "" and
 			("<p>当前绑定：<code>" .. util.pcdata(slot.mac) .. "</code></p>") or
 			"<p>当前还没有设备占用这个槽位。</p>"
-		local form = "<p>扫码槽位：<strong>" .. util.pcdata(slot.name or "") .. "</strong></p>" ..
+		local summary = "<p>扫码槽位：<strong>" .. util.pcdata(slot.name or "") .. "</strong></p>" ..
 			"<p>固定地址：<strong>" .. util.pcdata(slot.ip or "") .. "</strong></p>" ..
 			"<p>目标节点：<strong>" .. util.pcdata(slot.node or "") .. "</strong></p>" ..
-			bound ..
-			"<p>确认后，这台手机的 MAC 会替换槽位中的旧设备。完成后请断开并重新连接 Wi-Fi。</p>" ..
+			bound
+		if not result.can_bind then
+			local detail = "<p><strong>该槽位已经锁定，当前手机不能替换原设备。</strong></p>" ..
+				"<p>请联系管理员，在扫码绑定页面为此槽位点击“允许换绑”，然后于10分钟内重新扫码。</p>"
+			return qr_bind_page("槽位已锁定", summary .. detail, "error")
+		end
+		local notice
+		if result.same_device then
+			notice = "<p>当前手机就是该槽位已绑定的设备，可以安全地再次确认。</p>"
+		elseif result.rebind_allowed then
+			local minutes = math.max(1, math.ceil((tonumber(result.rebind_remaining) or 0) / 60))
+			notice = "<p><strong>管理员已允许换绑，授权约剩余 " .. minutes .. " 分钟。</strong></p>" ..
+				"<p>确认后，这台手机将替换原设备。</p>"
+		else
+			notice = "<p>这是该槽位的首次绑定。</p>"
+		end
+		local form = summary .. notice ..
+			"<p>完成后请断开并重新连接 Wi-Fi。</p>" ..
 			"<form method=\"post\"><input type=\"hidden\" name=\"slot_token\" value=\"" .. util.pcdata(token) .. "\">" ..
 			"<button class=\"btn\" type=\"submit\">确认绑定这个扫码槽位</button></form>"
 		return qr_bind_page("扫码绑定", form, "warn")

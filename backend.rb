@@ -20,6 +20,7 @@ STATE = "/etc/openclash/openclash-editor-state.json"
 VERSION_FILE = "/usr/share/openclash-editor/VERSION"
 QR_TOKEN_DIR = "/tmp/openclash-editor-qr"
 QR_TOKEN_TTL = 600
+REBIND_WINDOW_SECONDS = 600
 SLOT_STATE = ENV["OPENCLASH_EDITOR_SLOT_STATE"].to_s.strip.empty? ? "/etc/openclash/openclash-editor-slots.json" : ENV["OPENCLASH_EDITOR_SLOT_STATE"].to_s
 SLOT_LOCK = ENV["OPENCLASH_EDITOR_SLOT_LOCK"].to_s.strip.empty? ? "/tmp/openclash-editor-slots.lock" : ENV["OPENCLASH_EDITOR_SLOT_LOCK"].to_s
 SKIP_SLOT_DHCP = ENV["OPENCLASH_EDITOR_SKIP_SLOT_DHCP"] == "1"
@@ -597,6 +598,24 @@ def slot_by_token!(slots, token)
   slots.find { |slot| slot["token"].to_s == token } || raise("固定槽位二维码不存在或已经失效")
 end
 
+def slot_rebind_status(slot, requester_mac = "", now = Time.now.to_i)
+  bound_mac = slot["mac"].to_s.downcase
+  requester_mac = requester_mac.to_s.downcase
+  rebind_until = slot["rebind_until"].to_i
+  bound = !bound_mac.empty?
+  same_device = bound && !requester_mac.empty? && requester_mac == bound_mac
+  rebind_allowed = bound && rebind_until > now
+  {
+    "bound" => bound,
+    "same_device" => same_device,
+    "rebind_allowed" => rebind_allowed,
+    "rebind_until" => rebind_allowed ? rebind_until : 0,
+    "rebind_remaining" => rebind_allowed ? rebind_until - now : 0,
+    "locked" => bound && !rebind_allowed,
+    "can_bind" => !bound || same_device || rebind_allowed
+  }
+end
+
 def config_node_names
   Array(load_config["proxies"]).filter_map do |node|
     node["name"].to_s if node.is_a?(Hash) && !node["name"].to_s.empty?
@@ -704,7 +723,8 @@ def build_slots_for_nodes(node_names, slots, additional_ips = [], available_name
       "device_name" => "",
       "created_at" => now,
       "updated_at" => now,
-      "last_bound_at" => 0
+      "last_bound_at" => 0,
+      "rebind_until" => 0
     }
     working << slot
     slot
@@ -747,7 +767,8 @@ def augment_slots_from_rules(slots, rules, node_names)
       "device_name" => "",
       "created_at" => now,
       "updated_at" => now,
-      "last_bound_at" => 0
+      "last_bound_at" => 0,
+      "rebind_until" => 0
     }
     working << slot
     by_ip[parts["ip"]] = slot
@@ -781,11 +802,16 @@ def slots_response
   slots = current_slots.map do |slot|
     mac = slot["mac"].to_s.downcase
     lease = leases_by_mac[mac]
+    rebind = slot_rebind_status(slot)
     slot.merge(
       "online" => !mac.empty? && !lease.nil?,
       "current_ip" => lease ? lease["ip"].to_s : "",
       "rule_node" => rules_by_ip[slot["ip"].to_s].to_s,
-      "rule_ok" => rules_by_ip[slot["ip"].to_s].to_s == slot["node"].to_s
+      "rule_ok" => rules_by_ip[slot["ip"].to_s].to_s == slot["node"].to_s,
+      "locked" => rebind["locked"],
+      "rebind_allowed" => rebind["rebind_allowed"],
+      "rebind_until" => rebind["rebind_until"],
+      "rebind_remaining" => rebind["rebind_remaining"]
     )
   end
   slots.sort_by! do |slot|
@@ -835,7 +861,8 @@ def slots_create_response(node_name, count_value, prefix_value, start_value)
         "device_name" => "",
         "created_at" => now,
         "updated_at" => now,
-        "last_bound_at" => 0
+        "last_bound_at" => 0,
+        "rebind_until" => 0
       }
     end
     backup = apply_qr_rule_changes(created.to_h { |slot| [slot["ip"], slot["node"]] })
@@ -887,8 +914,20 @@ def slots_plan_response(request_path)
   { "ok" => true, "created" => created, "created_count" => created.length }
 end
 
-def slot_info_response(token)
+def slot_info_response(token, remote_address = "")
   slot = slot_by_token!(read_slots, token)
+  requester = {}
+  requester_error = ""
+  unless remote_address.to_s.empty?
+    begin
+      source_ip = lan_ip!(remote_address)
+      requester = lookup_lan_device(source_ip)
+      requester["ip"] = source_ip
+    rescue StandardError => error
+      requester_error = error.message
+    end
+  end
+  rebind = slot_rebind_status(slot, requester["mac"])
   {
     "ok" => true,
     "slot" => {
@@ -898,6 +937,14 @@ def slot_info_response(token)
       "mac" => slot["mac"].to_s,
       "device_name" => slot["device_name"].to_s
     },
+    "requester_mac" => requester["mac"].to_s,
+    "requester_name" => requester["hostname"].to_s,
+    "requester_error" => requester_error,
+    "same_device" => rebind["same_device"],
+    "rebind_allowed" => rebind["rebind_allowed"],
+    "rebind_remaining" => rebind["rebind_remaining"],
+    "locked" => rebind["locked"],
+    "can_bind" => rebind["can_bind"],
     "permanent" => true
   }
 end
@@ -931,9 +978,31 @@ def slot_regenerate_response(id)
     slots = read_slots
     slot = slot_by_id!(slots, id)
     slot["token"] = random_hex(16)
+    slot["rebind_until"] = 0
     slot["updated_at"] = Time.now.to_i
     write_slots(slots)
     { "ok" => true, "slot" => slot }
+  end
+end
+
+def slot_rebind_response(id, enabled)
+  with_slot_lock do
+    slots = read_slots
+    slot = slot_by_id!(slots, id)
+    allow = enabled.to_s == "1"
+    raise "未绑定设备的槽位不需要开启换绑" if allow && slot["mac"].to_s.empty?
+    now = Time.now.to_i
+    slot["rebind_until"] = allow ? now + REBIND_WINDOW_SECONDS : 0
+    slot["updated_at"] = now
+    write_slots(slots)
+    status = slot_rebind_status(slot, "", now)
+    {
+      "ok" => true,
+      "slot" => slot,
+      "rebind_allowed" => status["rebind_allowed"],
+      "rebind_until" => status["rebind_until"],
+      "rebind_remaining" => status["rebind_remaining"]
+    }
   end
 end
 
@@ -1051,6 +1120,10 @@ def slot_bind_response(token, remote_address)
     slot = slot_by_token!(slots, token)
     target_ip = lan_ip!(slot["ip"])
     raise "槽位引用的节点已经不存在：#{slot['node']}" unless config_node_names.include?(slot["node"].to_s)
+    rebind = slot_rebind_status(slot, mac)
+    unless rebind["can_bind"]
+      raise "该扫码槽位已绑定其他设备并处于锁定状态，请联系管理员在扫码绑定页面点击“允许换绑”"
+    end
 
     sections = dhcp_host_sections
     target_section = "oce_slot_#{slot['id']}"
@@ -1082,6 +1155,7 @@ def slot_bind_response(token, remote_address)
           previous_slot["device_name"] = ""
           previous_slot["updated_at"] = Time.now.to_i
           previous_slot["last_bound_at"] = 0
+          previous_slot["rebind_until"] = 0
         end
       elsif previous_values["ip"].to_s != target_ip
         changes[previous_values["ip"].to_s] = nil
@@ -1113,11 +1187,13 @@ def slot_bind_response(token, remote_address)
         item["device_name"] = ""
         item["updated_at"] = Time.now.to_i
         item["last_bound_at"] = 0
+        item["rebind_until"] = 0
       end
       slot["mac"] = mac
       slot["device_name"] = device["hostname"].to_s
       slot["updated_at"] = Time.now.to_i
       slot["last_bound_at"] = Time.now.to_i
+      slot["rebind_until"] = 0
       write_slots(slots)
     rescue StandardError
       File.binwrite(SOURCE, File.binread(backup)) if backup
@@ -1133,6 +1209,8 @@ def slot_bind_response(token, remote_address)
       "hostname" => device["hostname"].to_s,
       "backup" => backup.to_s,
       "config_changed" => !backup.nil?,
+      "same_device" => rebind["same_device"],
+      "replaced_device" => rebind["bound"] && !rebind["same_device"],
       "reload_openclash" => request_openclash_reload(!backup.nil?),
       "reconnect_required" => source_ip != target_ip
     }
@@ -1410,7 +1488,8 @@ def normalize_preview_slots(requested_slots, node_names, rules)
       "device_name" => existing ? existing["device_name"].to_s : "",
       "created_at" => existing ? existing["created_at"].to_i : (raw["created_at"].to_i.positive? ? raw["created_at"].to_i : now),
       "updated_at" => now,
-      "last_bound_at" => existing ? existing["last_bound_at"].to_i : 0
+      "last_bound_at" => existing ? existing["last_bound_at"].to_i : 0,
+      "rebind_until" => existing ? existing["rebind_until"].to_i : raw["rebind_until"].to_i
     }
   end
 end
@@ -1517,10 +1596,11 @@ if __FILE__ == $PROGRAM_NAME
              when "slots-create-many" then slots_create_many_response(ARGV.fetch(1))
              when "slots-plan" then slots_plan_response(ARGV.fetch(1))
              when "slots-apply-pending" then slots_apply_pending_response
-             when "slot-info" then slot_info_response(ARGV.fetch(1))
+             when "slot-info" then slot_info_response(ARGV.fetch(1), ARGV[2].to_s)
              when "slot-bind" then slot_bind_response(ARGV.fetch(1), ARGV.fetch(2))
              when "slot-update" then slot_update_response(ARGV.fetch(1), ARGV.fetch(2))
              when "slot-regenerate" then slot_regenerate_response(ARGV.fetch(1))
+             when "slot-rebind" then slot_rebind_response(ARGV.fetch(1), ARGV.fetch(2))
              when "slot-delete" then slot_delete_response(ARGV.fetch(1))
              when "slots-delete" then slots_delete_response(ARGV.fetch(1))
              else raise "未知操作"

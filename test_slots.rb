@@ -44,6 +44,25 @@ end
 
 first = slots.first
 old_token = first["token"]
+bound_probe = first.merge("mac" => "02:11:22:33:44:55", "rebind_until" => 0)
+different_device = slot_rebind_status(bound_probe, "02:aa:bb:cc:dd:ee", 1_000)
+abort "bound slot did not lock a different device" unless different_device["locked"] && !different_device["can_bind"]
+same_device = slot_rebind_status(bound_probe, "02:11:22:33:44:55", 1_000)
+abort "bound slot blocked the same device" unless same_device["same_device"] && same_device["can_bind"]
+first["mac"] = "02:11:22:33:44:55"
+first["device_name"] = "locked-phone"
+write_slots(slots)
+allowed = slot_rebind_response(first["id"], "1")
+abort "rebind authorization was not opened" unless allowed["rebind_allowed"] && allowed["rebind_remaining"].between?(590, 600)
+authorized_slot = read_slots.find { |slot| slot["id"] == first["id"] }
+authorized_status = slot_rebind_status(authorized_slot, "02:aa:bb:cc:dd:ee")
+abort "authorized replacement device was blocked" unless authorized_status["can_bind"]
+cancelled = slot_rebind_response(first["id"], "0")
+abort "rebind authorization was not cancelled" if cancelled["rebind_allowed"]
+expired_status = slot_rebind_status(bound_probe.merge("rebind_until" => 999), "02:aa:bb:cc:dd:ee", 1_000)
+abort "expired rebind authorization remained usable" if expired_status["can_bind"]
+slot_rebind_response(first["id"], "1")
+
 updated = slot_update_response(first["id"], "second-node")
 abort "slot node update failed" unless updated.dig("slot", "node") == "second-node"
 config = YAML.load_file(config_path, aliases: true)
@@ -53,6 +72,7 @@ regenerated = slot_regenerate_response(first["id"])
 new_token = regenerated.dig("slot", "token")
 abort "slot token was not regenerated" if new_token == old_token
 abort "new slot token is invalid" unless new_token.match?(/\A[0-9a-f]{32}\z/)
+abort "QR reset did not close rebind authorization" unless regenerated.dig("slot", "rebind_until").to_i.zero?
 info = slot_info_response(new_token)
 abort "slot info mismatch" unless info.dig("slot", "name") == first["name"]
 
