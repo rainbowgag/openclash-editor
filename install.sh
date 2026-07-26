@@ -73,7 +73,6 @@ fetch_file "$BASE_URL/update.sh" "/usr/share/openclash-editor/update.sh"
 fetch_file "$BASE_URL/luci/controller/openclash_editor.lua" "/usr/lib/lua/luci/controller/openclash_editor.lua"
 fetch_file "$BASE_URL/luci/view/openclash_editor/nodes.htm" "/usr/lib/lua/luci/view/openclash_editor/nodes.htm"
 fetch_file "$BASE_URL/luci/view/openclash_editor/rules.htm" "/usr/lib/lua/luci/view/openclash_editor/rules.htm"
-fetch_file "$BASE_URL/luci/view/openclash_editor/qr.htm" "/usr/lib/lua/luci/view/openclash_editor/qr.htm"
 fetch_file "$BASE_URL/luci/view/openclash_editor/slots.htm" "/usr/lib/lua/luci/view/openclash_editor/slots.htm"
 fetch_file "$BASE_URL/www/converter.js" "/www/luci-static/resources/openclash-editor/converter.js"
 fetch_file "$BASE_URL/www/editor-common.js" "/www/luci-static/resources/openclash-editor/editor-common.js"
@@ -95,13 +94,13 @@ chmod 644 /usr/share/openclash-editor/EDITION
 chmod 644 /usr/lib/lua/luci/controller/openclash_editor.lua
 chmod 644 /usr/lib/lua/luci/view/openclash_editor/nodes.htm
 chmod 644 /usr/lib/lua/luci/view/openclash_editor/rules.htm
-chmod 644 /usr/lib/lua/luci/view/openclash_editor/qr.htm
 chmod 644 /usr/lib/lua/luci/view/openclash_editor/slots.htm
 chmod 644 /www/luci-static/resources/openclash-editor/converter.js
 chmod 644 /www/luci-static/resources/openclash-editor/editor-common.js
 chmod 644 /www/luci-static/resources/openclash-editor/editor.css
 
 rm -f /usr/lib/lua/luci/view/openclash_editor/index.htm
+rm -f /usr/lib/lua/luci/view/openclash_editor/qr.htm
 
 ruby -c /usr/share/openclash-editor/backend.rb >/dev/null
 lua /usr/lib/lua/luci/controller/openclash_editor.lua >/dev/null

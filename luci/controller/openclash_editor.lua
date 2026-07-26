@@ -12,6 +12,7 @@ local request_path = "/tmp/openclash-editor-request.json"
 local token_path = "/tmp/openclash-editor-preview.sha256"
 local preview_source_path = "/tmp/openclash-editor-preview-source"
 local pending_state_path = "/tmp/openclash-editor-preview-state.json"
+local slot_plan_path = "/tmp/openclash-editor-slot-plan.json"
 local state_path = "/etc/openclash/openclash-editor-state.json"
 local backend_path = "/usr/share/openclash-editor/backend.rb"
 local update_path = "/usr/share/openclash-editor/update.sh"
@@ -55,13 +56,11 @@ function index()
 	rules_page.leaf = true
 	rules_page.acl_depends = { "luci-app-openclash" }
 	local qr_page = entry({"admin", "services", "openclash", "visual-editor-qr"},
-		template("openclash_editor/qr"), _("扫码绑定"), 87)
+		template("openclash_editor/slots"), _("扫码绑定"), 87)
 	qr_page.leaf = true
 	qr_page.acl_depends = { "luci-app-openclash" }
-	local slots_page = entry({"admin", "services", "openclash", "visual-editor-slots"},
-		template("openclash_editor/slots"), _("固定槽位"), 88)
-	slots_page.leaf = true
-	slots_page.acl_depends = { "luci-app-openclash" }
+	entry({"admin", "services", "openclash", "visual-editor-slots"},
+		alias("admin", "services", "openclash", "visual-editor-qr")).leaf = true
 	entry({"admin", "services", "openclash", "visual-editor-state"}, call("action_state")).leaf = true
 	entry({"admin", "services", "openclash", "visual-editor-preview"}, call("action_preview")).leaf = true
 	entry({"admin", "services", "openclash", "visual-editor-apply"}, call("action_apply")).leaf = true
@@ -69,17 +68,14 @@ function index()
 	entry({"admin", "services", "openclash", "visual-editor-reset"}, call("action_reset")).leaf = true
 	entry({"admin", "services", "openclash", "visual-editor-update-check"}, call("action_update_check")).leaf = true
 	entry({"admin", "services", "openclash", "visual-editor-update"}, call("action_update")).leaf = true
-	entry({"admin", "services", "openclash", "visual-editor-qr-create"}, call("action_qr_create")).leaf = true
-	entry({"admin", "services", "openclash", "visual-editor-qr-devices"}, call("action_qr_devices")).leaf = true
-	entry({"admin", "services", "openclash", "visual-editor-qr-change"}, call("action_qr_change")).leaf = true
-	entry({"admin", "services", "openclash", "visual-editor-qr-unproxy"}, call("action_qr_unproxy")).leaf = true
-	entry({"admin", "services", "openclash", "visual-editor-qr-delete"}, call("action_qr_delete")).leaf = true
-	entry({"admin", "services", "openclash", "visual-editor-qr-delete-bulk"}, call("action_qr_delete_bulk")).leaf = true
 	entry({"admin", "services", "openclash", "visual-editor-slots-list"}, call("action_slots_list")).leaf = true
 	entry({"admin", "services", "openclash", "visual-editor-slots-create"}, call("action_slots_create")).leaf = true
+	entry({"admin", "services", "openclash", "visual-editor-slots-create-many"}, call("action_slots_create_many")).leaf = true
+	entry({"admin", "services", "openclash", "visual-editor-slots-plan"}, call("action_slots_plan")).leaf = true
 	entry({"admin", "services", "openclash", "visual-editor-slot-update"}, call("action_slot_update")).leaf = true
 	entry({"admin", "services", "openclash", "visual-editor-slot-regenerate"}, call("action_slot_regenerate")).leaf = true
 	entry({"admin", "services", "openclash", "visual-editor-slot-delete"}, call("action_slot_delete")).leaf = true
+	entry({"admin", "services", "openclash", "visual-editor-slots-delete"}, call("action_slots_delete")).leaf = true
 	entry({"openclash-editor-bind"}, call("action_qr_bind")).leaf = true
 	entry({"oeb"}, call("action_qr_bind")).leaf = true
 end
@@ -219,7 +215,7 @@ function action_slots_list()
 		if not result.ok then return reply(false, result) end
 		reply(true, result)
 	end, debug.traceback)
-	if not ok then reply(false, { error = "读取固定槽位失败", details = err }) end
+	if not ok then reply(false, { error = "读取扫码槽位失败", details = err }) end
 end
 
 function action_slots_create()
@@ -245,7 +241,50 @@ function action_slots_create()
 		if not result.ok then return reply(false, result) end
 		reply(true, result)
 	end, debug.traceback)
-	if not ok then reply(false, { error = "创建固定槽位失败", details = err }) end
+	if not ok then reply(false, { error = "创建扫码槽位失败", details = err }) end
+end
+
+local function parse_name_list(raw)
+	local names = {}
+	for name in tostring(raw or ""):gmatch("[^,]+") do
+		name = name:gsub("^%s+", ""):gsub("%s+$", "")
+		if name ~= "" then names[#names + 1] = name end
+	end
+	return names
+end
+
+function action_slots_create_many()
+	if not require_post() then return end
+	local ok, err = xpcall(function()
+		local raw = http.formvalue("nodes") or ""
+		if type(raw) ~= "string" or #raw > 65535 then return reply(false, { error = "节点参数无效" }) end
+		local names = parse_name_list(raw)
+		if #names == 0 then return reply(false, { error = "请至少选择一个节点" }) end
+		if #names > 256 then return reply(false, { error = "单次最多选择 256 个节点" }) end
+		local result, backend_err, details = run_backend("slots-create-many " .. shellquote(table.concat(names, ",")))
+		if not result then return reply(false, { error = backend_err, details = details }) end
+		if not result.ok then return reply(false, result) end
+		reply(true, result)
+	end, debug.traceback)
+	if not ok then reply(false, { error = "按节点批量创建扫码槽位失败", details = err }) end
+end
+
+function action_slots_plan()
+	if not require_post() then return end
+	local ok, err = xpcall(function()
+		local payload = http.formvalue("payload") or ""
+		if type(payload) ~= "string" or #payload == 0 or #payload > 1048576 then
+			return reply(false, { error = "槽位规划数据无效" })
+		end
+		if not json.parse(payload) then return reply(false, { error = "槽位规划 JSON 格式错误" }) end
+		if not fs.writefile(slot_plan_path, payload) then return reply(false, { error = "无法写入槽位规划请求" }) end
+		local result, backend_err, details = run_backend("slots-plan " .. shellquote(slot_plan_path))
+		fs.remove(slot_plan_path)
+		if not result then return reply(false, { error = backend_err, details = details }) end
+		if not result.ok then return reply(false, result) end
+		reply(true, result)
+	end, debug.traceback)
+	if not ok then reply(false, { error = "规划扫码槽位失败", details = err }) end
 end
 
 local function slot_id_action(command, include_node)
@@ -253,7 +292,7 @@ local function slot_id_action(command, include_node)
 	local id = http.formvalue("id") or ""
 	local node = http.formvalue("node") or ""
 	if type(id) ~= "string" or not id:match("^[0-9a-f]+$") or #id ~= 12 then
-		return reply(false, { error = "固定槽位编号无效" })
+		return reply(false, { error = "扫码槽位编号无效" })
 	end
 	if include_node and (type(node) ~= "string" or node == "" or #node > 256) then
 		return reply(false, { error = "请输入已有节点名称" })
@@ -268,17 +307,33 @@ end
 
 function action_slot_update()
 	local ok, err = xpcall(function() slot_id_action("slot-update", true) end, debug.traceback)
-	if not ok then reply(false, { error = "修改固定槽位失败", details = err }) end
+	if not ok then reply(false, { error = "修改扫码槽位失败", details = err }) end
 end
 
 function action_slot_regenerate()
 	local ok, err = xpcall(function() slot_id_action("slot-regenerate", false) end, debug.traceback)
-	if not ok then reply(false, { error = "重置固定槽位二维码失败", details = err }) end
+	if not ok then reply(false, { error = "重置扫码槽位二维码失败", details = err }) end
 end
 
 function action_slot_delete()
 	local ok, err = xpcall(function() slot_id_action("slot-delete", false) end, debug.traceback)
-	if not ok then reply(false, { error = "删除固定槽位失败", details = err }) end
+	if not ok then reply(false, { error = "删除扫码槽位失败", details = err }) end
+end
+
+function action_slots_delete()
+	if not require_post() then return end
+	local ok, err = xpcall(function()
+		local raw = http.formvalue("ids") or ""
+		if type(raw) ~= "string" or #raw > 8192 then return reply(false, { error = "批量删除参数无效" }) end
+		local ids = parse_name_list(raw)
+		if #ids == 0 then return reply(false, { error = "请至少选择一个扫码槽位" }) end
+		if #ids > 256 then return reply(false, { error = "单次最多批量删除 256 个扫码槽位" }) end
+		local result, backend_err, details = run_backend("slots-delete " .. shellquote(table.concat(ids, ",")))
+		if not result then return reply(false, { error = backend_err, details = details }) end
+		if not result.ok then return reply(false, result) end
+		reply(true, result)
+	end, debug.traceback)
+	if not ok then reply(false, { error = "批量删除扫码槽位失败", details = err }) end
 end
 
 local function qr_bind_page(title, body, tone)
@@ -292,21 +347,11 @@ local function qr_bind_page(title, body, tone)
 end
 
 local function qr_bind_impl()
-	local slot_mode = false
 	local token = http.formvalue("s")
 	if type(token) == "table" then token = token[1] end
 	if type(token) ~= "string" or token == "" then
 		token = http.formvalue("slot_token")
 		if type(token) == "table" then token = token[1] end
-	end
-	if type(token) == "string" and token ~= "" then slot_mode = true end
-	if not slot_mode then
-		token = http.formvalue("t")
-		if type(token) == "table" then token = token[1] end
-		if type(token) ~= "string" or token == "" then
-			token = http.formvalue("token")
-			if type(token) == "table" then token = token[1] end
-		end
 	end
 	if type(token) ~= "string" then token = "" end
 	if not token:match("^[0-9a-f]+$") or #token ~= 32 then
@@ -314,53 +359,34 @@ local function qr_bind_impl()
 	end
 
 	if http.getenv("REQUEST_METHOD") ~= "POST" then
-		local info_command = slot_mode and "slot-info " or "qr-info "
-		local result, err, details = run_backend(info_command .. shellquote(token))
+		local result, err, details = run_backend("slot-info " .. shellquote(token))
 		if not result or not result.ok then
 			local message = result and result.error or err or details or "二维码不可用"
 			return qr_bind_page("二维码不可用", "<p>" .. util.pcdata(message) .. "</p>", "error")
 		end
-		if slot_mode then
-			local slot = result.slot or {}
-			local bound = slot.mac and slot.mac ~= "" and
-				("<p>当前绑定：<code>" .. util.pcdata(slot.mac) .. "</code></p>") or
-				"<p>当前还没有设备占用这个槽位。</p>"
-			local form = "<p>固定槽位：<strong>" .. util.pcdata(slot.name or "") .. "</strong></p>" ..
-				"<p>固定地址：<strong>" .. util.pcdata(slot.ip or "") .. "</strong></p>" ..
-				"<p>目标节点：<strong>" .. util.pcdata(slot.node or "") .. "</strong></p>" ..
-				bound ..
-				"<p>确认后，这台手机的 MAC 会替换槽位中的旧设备。完成后请断开并重新连接 Wi-Fi。</p>" ..
-				"<form method=\"post\"><input type=\"hidden\" name=\"slot_token\" value=\"" .. util.pcdata(token) .. "\">" ..
-				"<button class=\"btn\" type=\"submit\">确认占用这个固定槽位</button></form>"
-			return qr_bind_page("固定槽位绑定", form, "warn")
-		end
-		local reload_text = result.reload_openclash and
-			"<p>确认后会写入固定 DHCP 租约和设备规则，并自动重启 OpenClash 使规则生效。</p>" or
-			"<p>确认后会写入固定 DHCP 租约和设备规则；需要稍后手动重新载入 OpenClash。</p>"
-		local form = "<p>目标节点：<strong>" .. util.pcdata(result.node) .. "</strong></p>" ..
-			reload_text ..
-			"<form method=\"post\"><input type=\"hidden\" name=\"token\" value=\"" .. util.pcdata(token) .. "\">" ..
-			"<button class=\"btn\" type=\"submit\">确认绑定这台设备</button></form>"
-		return qr_bind_page("扫码绑定设备", form, "warn")
+		local slot = result.slot or {}
+		local bound = slot.mac and slot.mac ~= "" and
+			("<p>当前绑定：<code>" .. util.pcdata(slot.mac) .. "</code></p>") or
+			"<p>当前还没有设备占用这个槽位。</p>"
+		local form = "<p>扫码槽位：<strong>" .. util.pcdata(slot.name or "") .. "</strong></p>" ..
+			"<p>固定地址：<strong>" .. util.pcdata(slot.ip or "") .. "</strong></p>" ..
+			"<p>目标节点：<strong>" .. util.pcdata(slot.node or "") .. "</strong></p>" ..
+			bound ..
+			"<p>确认后，这台手机的 MAC 会替换槽位中的旧设备。完成后请断开并重新连接 Wi-Fi。</p>" ..
+			"<form method=\"post\"><input type=\"hidden\" name=\"slot_token\" value=\"" .. util.pcdata(token) .. "\">" ..
+			"<button class=\"btn\" type=\"submit\">确认绑定这个扫码槽位</button></form>"
+		return qr_bind_page("扫码绑定", form, "warn")
 	end
 
 	local remote_address = http.getenv("REMOTE_ADDR") or ""
-	local bind_command = slot_mode and "slot-bind " or "qr-bind "
-	local result, err, details = run_backend(bind_command .. shellquote(token) .. " " .. shellquote(remote_address))
+	local result, err, details = run_backend("slot-bind " .. shellquote(token) .. " " .. shellquote(remote_address))
 	if not result or not result.ok then
 		local message = result and result.error or err or details or "绑定失败"
 		return qr_bind_page("绑定失败", "<p>" .. util.pcdata(message) .. "</p>", "error")
 	end
-	local next_step
-	if slot_mode then
-		next_step = result.reload_openclash and
-			"<p>槽位规则已修复，OpenClash 正在后台重启。</p>" or
-			"<p>该固定槽位原有代理规则继续生效，不需要重复写入规则。</p>"
-	else
-		next_step = result.reload_openclash and
-			"<p>OpenClash 正在后台重启，网络可能短暂中断，请等待约 30 秒。</p>" or
-			"<p>请在 OpenClash 中重新载入配置后生效。</p>"
-	end
+	local next_step = result.reload_openclash and
+		"<p>槽位规则已修复，OpenClash 正在后台重启。</p>" or
+		"<p>该扫码槽位原有代理规则继续生效，不需要重复写入规则。</p>"
 	if result.reconnect_required then
 		next_step = next_step .. "<p><strong>请断开并重新连接一次 Wi-Fi</strong>，设备将获取槽位固定地址。</p>"
 	end
@@ -397,7 +423,8 @@ local function preview_impl()
 		diff = result.diff or "",
 		test_path = test_path,
 		node_count = result.node_count,
-		rule_count = result.rule_count
+		rule_count = result.rule_count,
+		slot_count = result.slot_count
 	})
 end
 
@@ -431,6 +458,16 @@ local function apply_impl()
 		sys.call("mv " .. shellquote(staged) .. " " .. shellquote(source_path)) ~= 0 then
 		return reply(false, { error = "应用配置失败，正式配置未被替换", backup = backup })
 	end
+	local slot_result, slot_error, slot_details = run_backend("slots-apply-pending")
+	if not slot_result or not slot_result.ok then
+		sys.call("cp -p " .. shellquote(backup) .. " " .. shellquote(source_path))
+		local message = slot_result and slot_result.error or slot_error or "应用扫码槽位失败"
+		return reply(false, {
+			error = message .. "；正式 YAML 已回滚",
+			details = slot_details or (slot_result and slot_result.details),
+			backup = backup
+		})
+	end
 	if fs.access(pending_state_path) then
 		sys.call("cp " .. shellquote(pending_state_path) .. " " .. shellquote(state_path))
 	end
@@ -444,7 +481,12 @@ local function apply_impl()
 			backup = backup
 		})
 	end
-	reply(true, { message = "配置已应用，OpenClash 正在后台重启", backup = backup })
+	reply(true, {
+		message = "配置与扫码槽位已应用，OpenClash 正在后台重启",
+		backup = backup,
+		slot_count = slot_result.slot_count,
+		removed_slot_count = slot_result.removed_count
+	})
 end
 
 function action_apply()

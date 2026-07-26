@@ -1,7 +1,7 @@
 (function(global) {
   'use strict';
 
-  var STORAGE_KEY = 'openclash-editor-draft-v2';
+  var STORAGE_KEY = 'openclash-editor-draft-v3';
   var urls = {};
 
   function configure(value) { urls = value || {}; }
@@ -79,12 +79,13 @@
     draft.nodes.forEach(function(node) {
       if (selected[node.name]) existing[node.name] = true;
     });
-    var nodeCount = Object.keys(existing).length, beforeRules = draft.rules.length;
+    var nodeCount = Object.keys(existing).length, beforeRules = draft.rules.length, beforeSlots = (draft.slots || []).length;
     draft.nodes = draft.nodes.filter(function(node) { return !existing[node.name]; });
     draft.rules = draft.rules.filter(function(rule) { return !existing[ruleParts(rule).name]; });
+    draft.slots = (draft.slots || []).filter(function(slot) { return !existing[slot.node]; });
     draft.selected_node_names = (draft.selected_node_names || []).filter(function(name) { return !existing[name]; });
     recalculateNextIp(draft);
-    return {nodes: nodeCount, rules: beforeRules - draft.rules.length};
+    return {nodes: nodeCount, rules: beforeRules - draft.rules.length, slots: beforeSlots - draft.slots.length};
   }
 
   function removeRulesByIps(draft, ips) {
@@ -92,15 +93,16 @@
     (ips || []).forEach(function(ip) { selected[String(ip)] = true; });
     var before = draft.rules.length;
     draft.rules = draft.rules.filter(function(rule) { return !selected[ruleParts(rule).ip]; });
+    draft.slots = (draft.slots || []).filter(function(slot) { return !selected[String(slot.ip) + '/32']; });
     recalculateNextIp(draft);
     return before - draft.rules.length;
   }
 
   function fromState(state) {
     var draft = {
-      schema: 2,
+      schema: 3,
       source_sha256: state.source_sha256,
-      nodes: state.nodes || [], rules: state.rules || [],
+      nodes: state.nodes || [], rules: state.rules || [], slots: state.slots || [],
       existing_node_names: (state.nodes || []).map(function(node) { return node.name; }),
       existing_rules: (state.rules || []).slice(),
       network_cidr: state.network_cidr,
@@ -130,7 +132,7 @@
       if (!state.ok) throw new Error(state.error + (state.details ? '\n' + state.details : ''));
       var stored = null;
       try { stored = JSON.parse(sessionStorage.getItem(STORAGE_KEY) || 'null'); } catch (_) { stored = null; }
-      if (stored && stored.schema === 2 && stored.source_sha256 === state.source_sha256) {
+      if (stored && stored.schema === 3 && stored.source_sha256 === state.source_sha256) {
         stored.version = state.version || stored.version;
         stored.architecture = state.architecture || stored.architecture || 'unknown';
         stored.detected_lan_cidr = state.detected_lan_cidr;

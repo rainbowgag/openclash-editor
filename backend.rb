@@ -15,6 +15,7 @@ end
 SOURCE = configured_source
 TEST = "/tmp/openclash-editor-preview.yaml"
 PENDING_STATE = "/tmp/openclash-editor-preview-state.json"
+PENDING_SLOTS = "/tmp/openclash-editor-preview-slots.json"
 STATE = "/etc/openclash/openclash-editor-state.json"
 VERSION_FILE = "/usr/share/openclash-editor/VERSION"
 QR_TOKEN_DIR = "/tmp/openclash-editor-qr"
@@ -617,7 +618,7 @@ rescue StandardError
   nil
 end
 
-def slot_allocatable_ips(count)
+def slot_allocatable_ips(count, additional_ips = [])
   lan = detect_lan
   network = cidr_info(lan.fetch("cidr"))
   used = {}
@@ -646,6 +647,13 @@ def slot_allocatable_ips(count)
       nil
     end
   end
+  Array(additional_ips).each do |address|
+    begin
+      used[ipv4_to_i(address.to_s.sub(%r{/32\z}, ""))] = true
+    rescue StandardError
+      nil
+    end
+  end
   used[ipv4_to_i(lan["gateway"])] = true unless lan["gateway"].to_s.empty?
 
   saved_start = read_state["start_ip"].to_s
@@ -664,6 +672,43 @@ def slot_allocatable_ips(count)
   available = candidates.reject { |value| used[value] }.first(count)
   raise "LAN 网段没有足够的空闲固定 IP，需要 #{count} 个，仅找到 #{available.length} 个" if available.length < count
   available.map { |value| i_to_ipv4(value) }
+end
+
+def next_slot_name(node_name, slots)
+  prefix = "#{node_name}-槽位"
+  numbers = Array(slots).filter_map do |slot|
+    match = slot["name"].to_s.match(/\A#{Regexp.escape(prefix)}(\d+)\z/)
+    match[1].to_i if match
+  end
+  "#{prefix}#{numbers.empty? ? 1 : numbers.max + 1}"
+end
+
+def build_slots_for_nodes(node_names, slots, additional_ips = [], available_names = nil)
+  names = Array(node_names).map { |name| name.to_s.strip }
+  raise "请至少选择一个节点" if names.empty?
+  raise "单次最多为 256 个节点创建槽位" if names.length > 256
+  available = available_names || config_node_names
+  missing = names.reject { |name| available.include?(name) }
+  raise "目标节点不存在：#{missing.join('、')}" unless missing.empty?
+  ips = slot_allocatable_ips(names.length, additional_ips)
+  now = Time.now.to_i
+  working = slots.map(&:dup)
+  names.each_with_index.map do |node_name, index|
+    slot = {
+      "id" => random_hex(6),
+      "token" => random_hex(16),
+      "name" => next_slot_name(node_name, working),
+      "ip" => ips[index],
+      "node" => node_name,
+      "mac" => "",
+      "device_name" => "",
+      "created_at" => now,
+      "updated_at" => now,
+      "last_bound_at" => 0
+    }
+    working << slot
+    slot
+  end
 end
 
 def slots_response
@@ -749,6 +794,38 @@ def slots_create_response(node_name, count_value, prefix_value, start_value)
   end
 end
 
+def slots_create_many_response(node_list)
+  with_slot_lock do
+    names = node_list.to_s.split(",").map(&:strip).reject(&:empty?)
+    slots = read_slots
+    created = build_slots_for_nodes(names, slots)
+    backup = apply_qr_rule_changes(created.to_h { |slot| [slot["ip"], slot["node"]] })
+    begin
+      write_slots(slots + created)
+    rescue StandardError
+      File.binwrite(SOURCE, File.binread(backup))
+      raise
+    end
+    {
+      "ok" => true,
+      "created" => created,
+      "created_count" => created.length,
+      "backup" => backup,
+      "requires_apply" => true
+    }
+  end
+end
+
+def slots_plan_response(request_path)
+  request = YAML.safe_load(File.read(request_path), aliases: true) || {}
+  names = Array(request["nodes"]).map { |name| name.to_s.strip }
+  available_names = Array(request["available_nodes"]).map { |name| name.to_s.strip }
+  draft_slots = Array(request["slots"]).select { |slot| slot.is_a?(Hash) }
+  used_ips = Array(request["used_ips"])
+  created = build_slots_for_nodes(names, draft_slots, used_ips, available_names)
+  { "ok" => true, "created" => created, "created_count" => created.length }
+end
+
 def slot_info_response(token)
   slot = slot_by_token!(read_slots, token)
   {
@@ -819,6 +896,82 @@ def slot_delete_response(id)
       raise
     end
     { "ok" => true, "slot" => slot, "backup" => backup, "requires_apply" => true }
+  end
+end
+
+def slots_delete_response(id_list)
+  with_slot_lock do
+    ids = id_list.to_s.split(",").map(&:strip).reject(&:empty?).uniq
+    raise "请至少选择一个扫码槽位" if ids.empty?
+    raise "单次最多批量删除 256 个扫码槽位" if ids.length > 256
+    ids.each { |id| slot_id!(id) }
+    slots = read_slots
+    selected = slots.select { |slot| ids.include?(slot["id"].to_s) }
+    raise "没有找到选中的扫码槽位" if selected.empty?
+    missing = ids - selected.map { |slot| slot["id"].to_s }
+    raise "部分扫码槽位已经不存在：#{missing.join('、')}" unless missing.empty?
+
+    changes = selected.to_h { |slot| [slot["ip"], nil] }
+    backup = apply_qr_rule_changes(changes)
+    begin
+      sections = dhcp_host_sections
+      removed_sections = selected.map { |slot| "oce_slot_#{slot['id']}" }.select { |section| sections.key?(section) }
+      unless removed_sections.empty?
+        removed_sections.each { |section| system("uci", "-q", "delete", "dhcp.#{section}") }
+        unless system("uci", "commit", "dhcp")
+          system("uci", "revert", "dhcp")
+          raise "批量删除扫码槽位的 DHCP 固定租约失败"
+        end
+        system("/etc/init.d/dnsmasq", "reload") || raise("重新载入 DHCP 服务失败")
+      end
+      write_slots(slots.reject { |slot| ids.include?(slot["id"].to_s) })
+    rescue StandardError
+      File.binwrite(SOURCE, File.binread(backup))
+      raise
+    end
+    {
+      "ok" => true,
+      "deleted_count" => selected.length,
+      "deleted_ids" => selected.map { |slot| slot["id"] },
+      "backup" => backup,
+      "requires_apply" => true
+    }
+  end
+end
+
+def slots_apply_pending_response
+  raise "没有待应用的扫码槽位数据，请重新生成预览" unless File.file?(PENDING_SLOTS)
+  pending = YAML.safe_load(File.read(PENDING_SLOTS), aliases: true) || {}
+  desired = Array(pending["slots"]).select { |slot| slot.is_a?(Hash) }
+  with_slot_lock do
+    current = read_slots
+    desired_ids = desired.to_h { |slot| [slot["id"].to_s, true] }
+    removed = current.reject { |slot| desired_ids[slot["id"].to_s] }
+    sections = dhcp_host_sections
+    removed_sections = removed.map { |slot| "oce_slot_#{slot['id']}" }.select { |section| sections.key?(section) }
+    unless removed_sections.empty?
+      removed_sections.each { |section| system("uci", "-q", "delete", "dhcp.#{section}") }
+      unless system("uci", "commit", "dhcp")
+        system("uci", "revert", "dhcp")
+        raise "应用配置时删除失效槽位的 DHCP 固定租约失败"
+      end
+      system("/etc/init.d/dnsmasq", "reload") || raise("重新载入 DHCP 服务失败")
+    end
+    backup = ""
+    if File.file?(SLOT_STATE)
+      stamp = Time.now.strftime("%Y%m%d-%H%M%S")
+      backup = "#{SLOT_STATE}.backup-#{stamp}"
+      File.binwrite(backup, File.binread(SLOT_STATE))
+      File.chmod(0o600, backup)
+    end
+    write_slots(desired)
+    File.delete(PENDING_SLOTS)
+    {
+      "ok" => true,
+      "slot_count" => desired.length,
+      "removed_count" => removed.length,
+      "backup" => backup
+    }
   end
 end
 
@@ -1061,6 +1214,7 @@ def state_response
     "ok" => true,
     "nodes" => nodes,
     "rules" => rules,
+    "slots" => read_slots,
     "start_ip" => start_ip,
     "next_ip" => first_available_ip(rules, active_network, start_ip),
     "network_cidr" => active_network["cidr"],
@@ -1106,6 +1260,7 @@ def reset_response
     system("/etc/init.d/dnsmasq", "reload")
   end
   File.delete(SLOT_STATE) if File.exist?(SLOT_STATE)
+  File.delete(PENDING_SLOTS) if File.exist?(PENDING_SLOTS)
   File.delete(STATE) if File.exist?(STATE)
   { "ok" => true, "backup" => backup }
 end
@@ -1147,6 +1302,58 @@ def replace_device_rules(lines, rules)
   lines[header...finish] = replacement
 end
 
+def normalize_preview_slots(requested_slots, node_names, rules)
+  raise "扫码槽位数据必须是数组" unless requested_slots.is_a?(Array)
+  raise "扫码槽位数量超过上限" if requested_slots.length > 4096
+  current_by_id = read_slots.to_h { |slot| [slot["id"].to_s, slot] }
+  rules_by_ip = {}
+  Array(rules).each do |rule|
+    parts = rule_parts(rule)
+    rules_by_ip[parts["ip"]] = parts["name"] if parts
+  end
+  lan = detect_lan
+  network = cidr_info(lan["cidr"])
+  now = Time.now.to_i
+  seen_ids = {}
+  seen_tokens = {}
+  seen_names = {}
+  seen_ips = {}
+  requested_slots.map do |raw|
+    raise "扫码槽位数据格式错误" unless raw.is_a?(Hash)
+    id = slot_id!(raw["id"])
+    existing = current_by_id[id]
+    token = existing ? existing["token"].to_s : slot_token!(raw["token"])
+    name = raw["name"].to_s.strip
+    node_name = raw["node"].to_s.strip
+    address = existing ? existing["ip"].to_s : raw["ip"].to_s
+    value = ipv4_to_i(address)
+    raise "扫码槽位名称不能为空" if name.empty?
+    raise "扫码槽位名称不能包含逗号或换行：#{name}" if name.match?(/[,\r\n]/)
+    raise "扫码槽位名称过长：#{name}" if name.bytesize > 180
+    raise "扫码槽位引用了不存在的节点：#{node_name}" unless node_names.include?(node_name)
+    raise "扫码槽位 IP 不在当前 LAN 网段：#{address}" unless value.between?(network["first_i"], network["last_i"])
+    raise "扫码槽位不能使用路由器自身地址：#{address}" if address == lan["gateway"]
+    raise "扫码槽位缺少对应设备规则：#{address}/32 → #{node_name}" unless rules_by_ip[address].to_s == node_name
+    raise "扫码槽位编号重复：#{id}" if seen_ids[id]
+    raise "扫码槽位二维码重复" if seen_tokens[token]
+    raise "扫码槽位名称重复：#{name}" if seen_names[name]
+    raise "扫码槽位 IP 重复：#{address}" if seen_ips[address]
+    seen_ids[id] = seen_tokens[token] = seen_names[name] = seen_ips[address] = true
+    {
+      "id" => id,
+      "token" => token,
+      "name" => name,
+      "ip" => address,
+      "node" => node_name,
+      "mac" => existing ? existing["mac"].to_s : "",
+      "device_name" => existing ? existing["device_name"].to_s : "",
+      "created_at" => existing ? existing["created_at"].to_i : (raw["created_at"].to_i.positive? ? raw["created_at"].to_i : now),
+      "updated_at" => now,
+      "last_bound_at" => existing ? existing["last_bound_at"].to_i : 0
+    }
+  end
+end
+
 def preview_response(request_path)
   request = YAML.safe_load(File.read(request_path), aliases: true)
   nodes = request.fetch("nodes")
@@ -1155,6 +1362,7 @@ def preview_response(request_path)
   network = cidr_info(request.fetch("network_cidr"))
   start_ip = request.fetch("start_ip").to_s
   manual_network = request["manual_network"] == true
+  requested_slots = request.key?("slots") ? request["slots"] : read_slots
   start_ip_i = ipv4_to_i(start_ip)
   raise "自动分配起始 IP 不在规则网段内：#{start_ip}" unless start_ip_i.between?(network["first_i"], network["last_i"])
   raise "节点数据必须是数组" unless nodes.is_a?(Array)
@@ -1187,9 +1395,19 @@ def preview_response(request_path)
     seen_rule_ips[full_ip_i] = true
     raise "规则引用了不存在的节点：#{parts['name']}" unless names.include?(parts["name"])
   end
+  slots = normalize_preview_slots(requested_slots, names, rules)
 
   current_config = load_config
   diff = change_summary(current_config, nodes, rules, anchor_names)
+  current_slots = read_slots
+  current_by_id = current_slots.to_h { |slot| [slot["id"].to_s, slot] }
+  desired_by_id = slots.to_h { |slot| [slot["id"].to_s, slot] }
+  added_slots = desired_by_id.keys - current_by_id.keys
+  removed_slots = current_by_id.keys - desired_by_id.keys
+  modified_slots = (current_by_id.keys & desired_by_id.keys).count do |id|
+    %w[name node ip].any? { |key| current_by_id[id][key].to_s != desired_by_id[id][key].to_s }
+  end
+  diff = "#{diff}\n扫码槽位：新增 #{added_slots.length}，删除 #{removed_slots.length}，修改 #{modified_slots}"
   lines = File.read(SOURCE).gsub("\r\n", "\n").split("\n", -1)
   replace_anchor_names(lines, anchor_names)
   replace_nodes(lines, nodes)
@@ -1203,7 +1421,9 @@ def preview_response(request_path)
     "network_cidr" => network["cidr"],
     "manual_network" => manual_network
   }))
-  { "ok" => true, "node_count" => nodes.length, "rule_count" => rules.length, "diff" => diff, "source_path" => SOURCE }
+  File.write(PENDING_SLOTS, json_generate({ "slots" => slots }))
+  File.chmod(0o600, PENDING_SLOTS)
+  { "ok" => true, "node_count" => nodes.length, "rule_count" => rules.length, "slot_count" => slots.length, "diff" => diff, "source_path" => SOURCE }
 end
 
 if __FILE__ == $PROGRAM_NAME
@@ -1222,11 +1442,15 @@ if __FILE__ == $PROGRAM_NAME
              when "qr-devices-delete" then qr_devices_delete_response(ARGV.fetch(1), ARGV[2] == "1")
              when "slots" then slots_response
              when "slots-create" then slots_create_response(ARGV.fetch(1), ARGV.fetch(2), ARGV.fetch(3), ARGV.fetch(4))
+             when "slots-create-many" then slots_create_many_response(ARGV.fetch(1))
+             when "slots-plan" then slots_plan_response(ARGV.fetch(1))
+             when "slots-apply-pending" then slots_apply_pending_response
              when "slot-info" then slot_info_response(ARGV.fetch(1))
              when "slot-bind" then slot_bind_response(ARGV.fetch(1), ARGV.fetch(2))
              when "slot-update" then slot_update_response(ARGV.fetch(1), ARGV.fetch(2))
              when "slot-regenerate" then slot_regenerate_response(ARGV.fetch(1))
              when "slot-delete" then slot_delete_response(ARGV.fetch(1))
+             when "slots-delete" then slots_delete_response(ARGV.fetch(1))
              else raise "未知操作"
              end
     puts json_generate(result)

@@ -2,7 +2,7 @@
 
 set -eu
 
-MIRROR_BASE="${OPENCLASH_EDITOR_MIRROR_URL:-https://yy.yaml.uk:9443/openclash-editor/main}"
+MIRROR_BASE="${OPENCLASH_EDITOR_MIRROR_URL:-https://yy.yaml.uk:9443/openclash-editor/scan}"
 MIRROR_BASE="${MIRROR_BASE%/}"
 TEMPORARY="/tmp/openclash-editor-mirror-install.sh"
 
