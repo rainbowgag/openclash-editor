@@ -80,7 +80,7 @@ def ordered_node(node)
   output = ordered_hash(node, %w[
     name type server port username password uuid alterId cipher udp tls network flow
     servername sni client-fingerprint alpn reality-opts ws-opts http-opts grpc-opts
-    tcp-opts skip-cert-verify obfs obfs-password dialer-proxy
+    tcp-opts skip-cert-verify ss-opts obfs obfs-password dialer-proxy
   ])
   if output["reality-opts"].is_a?(Hash)
     output["reality-opts"] = ordered_hash(output["reality-opts"], %w[public-key short-id spider-x])
