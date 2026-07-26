@@ -1,10 +1,10 @@
 <%+header%>
-<link rel="stylesheet" href="<%=resource%>/openclash-editor/editor.css?v=2.0.1">
+<link rel="stylesheet" href="<%=resource%>/openclash-editor/editor.css?v=2.0.2">
 <style>
   .oce-slot-grid{display:grid;grid-template-columns:minmax(340px,1fr) minmax(320px,1fr);gap:20px}
   .oce-slot-create{display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:14px;align-items:end}
   .oce-slot-qr{min-height:350px;display:flex;align-items:center;justify-content:center;flex-direction:column;text-align:center}
-  .oce-slot-qr svg{width:min(390px,84vw);height:auto;max-width:100%;border:12px solid #fff;border-radius:12px;box-shadow:0 8px 28px #15254b22}
+  .oce-slot-qr svg{width:auto;height:auto;max-width:100%;shape-rendering:crispEdges;image-rendering:pixelated;border:12px solid #fff;border-radius:12px;box-shadow:0 8px 28px #15254b22}
   .oce-slot-url{max-width:100%;word-break:break-all;margin-top:14px}
   .oce-slot-node{min-width:190px}
   .oce-online{color:#08783e;font-weight:700}.oce-offline{color:#7a879e;font-weight:700}
@@ -98,7 +98,7 @@
     </div>
   </section>
 </div>
-<script src="<%=resource%>/openclash-editor/editor-common.js?v=2.0.1"></script>
+<script src="<%=resource%>/openclash-editor/editor-common.js?v=2.0.2"></script>
 <script>
 (function(){
   var E=OpenClashEditor;
@@ -163,7 +163,14 @@
     return L.require('uqr').then(function(Uqr){
       var renderer=typeof Uqr==='function'?new Uqr():Uqr;
       if(!renderer||typeof renderer.renderSVG!=='function')throw new Error('当前 LuCI 二维码组件不兼容');
-      el('slot_qr').innerHTML=renderer.renderSVG(url,{pixelSize:10,border:5,ecc:'M'});
+      el('slot_qr').innerHTML=renderer.renderSVG(url,{pixelSize:10,border:4,ecc:'M'});
+      var svg=el('slot_qr').querySelector('svg');
+      if(svg){
+        svg.setAttribute('shape-rendering','crispEdges');
+        svg.style.width=svg.getAttribute('width')+'px';
+        svg.style.height=svg.getAttribute('height')+'px';
+        svg.style.maxWidth='100%';
+      }
     });
   }
   function showQr(slot){
