@@ -711,15 +711,74 @@ def build_slots_for_nodes(node_names, slots, additional_ips = [], available_name
   end
 end
 
+def augment_slots_from_rules(slots, rules, node_names)
+  working = Array(slots).select { |slot| slot.is_a?(Hash) }.map(&:dup)
+  known_nodes = Array(node_names).map(&:to_s)
+  by_ip = {}
+  working.each do |slot|
+    address = slot["ip"].to_s
+    by_ip[address] ||= slot unless address.empty?
+  end
+  now = Time.now.to_i
+  created = []
+  updated = 0
+
+  Array(rules).each do |rule|
+    parts = rule_parts(rule)
+    next unless parts && known_nodes.include?(parts["name"])
+
+    slot = by_ip[parts["ip"]]
+    if slot
+      next if slot["node"].to_s == parts["name"]
+
+      slot["node"] = parts["name"]
+      slot["updated_at"] = now
+      updated += 1
+      next
+    end
+
+    slot = {
+      "id" => random_hex(6),
+      "token" => random_hex(16),
+      "name" => next_slot_name(parts["name"], working),
+      "ip" => parts["ip"],
+      "node" => parts["name"],
+      "mac" => "",
+      "device_name" => "",
+      "created_at" => now,
+      "updated_at" => now,
+      "last_bound_at" => 0
+    }
+    working << slot
+    by_ip[parts["ip"]] = slot
+    created << slot
+  end
+
+  [working, created, updated]
+end
+
 def slots_response
   config = load_config
+  node_names = Array(config["proxies"]).filter_map do |node|
+    node["name"].to_s if node.is_a?(Hash) && !node["name"].to_s.empty?
+  end
+  auto_created = []
+  auto_updated = 0
+  current_slots = with_slot_lock do
+    existing = read_slots
+    reconciled, created, updated = augment_slots_from_rules(existing, device_rules(config), node_names)
+    write_slots(reconciled) if created.any? || updated.positive?
+    auto_created = created
+    auto_updated = updated
+    reconciled
+  end
   rules_by_ip = {}
   device_rules(config).each do |rule|
     parts = rule_parts(rule)
     rules_by_ip[parts["ip"]] = parts["name"] if parts
   end
   leases_by_mac = active_dhcp_leases.to_h { |lease| [lease["mac"], lease] }
-  slots = read_slots.map do |slot|
+  slots = current_slots.map do |slot|
     mac = slot["mac"].to_s.downcase
     lease = leases_by_mac[mac]
     slot.merge(
@@ -737,6 +796,8 @@ def slots_response
   {
     "ok" => true,
     "slots" => slots,
+    "auto_created_count" => auto_created.length,
+    "auto_updated_count" => auto_updated,
     "lan_cidr" => detect_lan["cidr"],
     "version" => File.exist?(VERSION_FILE) ? File.read(VERSION_FILE).strip : "dev"
   }
@@ -1395,6 +1456,8 @@ def preview_response(request_path)
     seen_rule_ips[full_ip_i] = true
     raise "规则引用了不存在的节点：#{parts['name']}" unless names.include?(parts["name"])
   end
+  requested_slots, auto_created_slots, auto_updated_slots =
+    augment_slots_from_rules(requested_slots, rules, names)
   slots = normalize_preview_slots(requested_slots, names, rules)
 
   current_config = load_config
@@ -1423,7 +1486,16 @@ def preview_response(request_path)
   }))
   File.write(PENDING_SLOTS, json_generate({ "slots" => slots }))
   File.chmod(0o600, PENDING_SLOTS)
-  { "ok" => true, "node_count" => nodes.length, "rule_count" => rules.length, "slot_count" => slots.length, "diff" => diff, "source_path" => SOURCE }
+  {
+    "ok" => true,
+    "node_count" => nodes.length,
+    "rule_count" => rules.length,
+    "slot_count" => slots.length,
+    "auto_slot_count" => auto_created_slots.length,
+    "auto_updated_slot_count" => auto_updated_slots,
+    "diff" => diff,
+    "source_path" => SOURCE
+  }
 end
 
 if __FILE__ == $PROGRAM_NAME

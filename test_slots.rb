@@ -101,8 +101,32 @@ abort "slot delete failed" unless deleted["ok"] && read_slots.length == 3
 config = YAML.load_file(config_path, aliases: true)
 abort "deleted slot rule remained" if Array(config["rules"]).any? { |rule| rule.start_with?("SRC-IP-CIDR,#{first['ip']}/32,") }
 
+historical_ip = slot_allocatable_ips(1).first
+apply_qr_rule(historical_ip, "second-node")
+before_migration = read_slots.length
+migrated = slots_response
+abort "historical rule slot was not auto-created" unless migrated["auto_created_count"] == 1
+abort "historical rule migration count mismatch" unless migrated["slots"].length == before_migration + 1
+historical_slot = migrated["slots"].find { |slot| slot["ip"] == historical_ip }
+abort "historical rule slot target mismatch" unless historical_slot && historical_slot["node"] == "second-node"
+
+preview_autofill_path = "/tmp/openclash-editor-slot-preview-autofill-unit.json"
+formal_config = load_config
+File.write(preview_autofill_path, json_generate({
+  "nodes" => formal_config["proxies"],
+  "anchor_names" => ["test-node"],
+  "rules" => device_rules(formal_config),
+  "slots" => read_slots.reject { |slot| slot["id"] == historical_slot["id"] },
+  "start_ip" => detect_lan["first_host"],
+  "network_cidr" => detect_lan["cidr"],
+  "manual_network" => false
+}))
+autofilled_preview = preview_response(preview_autofill_path)
+abort "preview did not auto-create missing rule slot" unless autofilled_preview["auto_slot_count"] == 1
+abort "preview rule and slot counts diverged" unless autofilled_preview["slot_count"] == autofilled_preview["rule_count"]
+
 unless ENV["KEEP_SLOT_TEST"] == "1"
   Dir.glob("/tmp/.openclash-editor-slot-unit.yaml.qr-backup-*").each { |path| File.delete(path) }
-  [config_path, slot_state_path, slot_lock_path, plan_request, preview_request_path, PENDING_SLOTS].each { |path| File.delete(path) if File.exist?(path) }
+  [config_path, slot_state_path, slot_lock_path, plan_request, preview_request_path, preview_autofill_path, PENDING_SLOTS].each { |path| File.delete(path) if File.exist?(path) }
 end
 puts "FIXED_SLOT_CORE_OK"

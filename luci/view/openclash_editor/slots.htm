@@ -1,5 +1,5 @@
 <%+header%>
-<link rel="stylesheet" href="<%=resource%>/openclash-editor/editor.css?v=2.0.0">
+<link rel="stylesheet" href="<%=resource%>/openclash-editor/editor.css?v=2.0.1">
 <style>
   .oce-slot-grid{display:grid;grid-template-columns:minmax(340px,1fr) minmax(320px,1fr);gap:20px}
   .oce-slot-create{display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:14px;align-items:end}
@@ -98,7 +98,7 @@
     </div>
   </section>
 </div>
-<script src="<%=resource%>/openclash-editor/editor-common.js?v=2.0.0"></script>
+<script src="<%=resource%>/openclash-editor/editor-common.js?v=2.0.1"></script>
 <script>
 (function(){
   var E=OpenClashEditor;
@@ -155,7 +155,8 @@
     return E.get(urls.list).then(function(result){
       if(!result.ok)throw new Error(result.error+(result.details?'\n'+result.details:''));
       slots=result.slots||[];renderSlots();
-      msg('已读取 '+slots.length+' 个扫码槽位，LAN 网段 '+result.lan_cidr,'ok');
+      var migration=result.auto_created_count>0?'；已根据现有设备规则自动补齐 '+result.auto_created_count+' 个槽位':'';
+      msg('已读取 '+slots.length+' 个扫码槽位，LAN 网段 '+result.lan_cidr+migration,'ok');
     }).catch(function(error){msg('读取扫码槽位失败：'+error.message,'error')}).then(function(){el('refresh_slots').disabled=false});
   }
   function drawQr(url){
