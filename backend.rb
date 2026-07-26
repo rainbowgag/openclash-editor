@@ -19,6 +19,9 @@ STATE = "/etc/openclash/openclash-editor-state.json"
 VERSION_FILE = "/usr/share/openclash-editor/VERSION"
 QR_TOKEN_DIR = "/tmp/openclash-editor-qr"
 QR_TOKEN_TTL = 600
+SLOT_STATE = ENV["OPENCLASH_EDITOR_SLOT_STATE"].to_s.strip.empty? ? "/etc/openclash/openclash-editor-slots.json" : ENV["OPENCLASH_EDITOR_SLOT_STATE"].to_s
+SLOT_LOCK = ENV["OPENCLASH_EDITOR_SLOT_LOCK"].to_s.strip.empty? ? "/tmp/openclash-editor-slots.lock" : ENV["OPENCLASH_EDITOR_SLOT_LOCK"].to_s
+SKIP_SLOT_DHCP = ENV["OPENCLASH_EDITOR_SKIP_SLOT_DHCP"] == "1"
 
 def json_generate(value)
   case value
@@ -98,6 +101,35 @@ def read_state
   YAML.safe_load(File.read(STATE), aliases: true) || {}
 rescue Errno::ENOENT, Psych::SyntaxError
   {}
+end
+
+def read_slots
+  data = YAML.safe_load(File.read(SLOT_STATE), aliases: true) || {}
+  Array(data["slots"]).select { |slot| slot.is_a?(Hash) }
+rescue Errno::ENOENT, Psych::SyntaxError
+  []
+end
+
+def write_slots(slots)
+  directory = File.dirname(SLOT_STATE)
+  Dir.mkdir(directory, 0o755) unless Dir.exist?(directory)
+  staged = "#{SLOT_STATE}.new"
+  File.write(staged, json_generate({ "slots" => slots }))
+  File.chmod(0o600, staged)
+  File.rename(staged, SLOT_STATE)
+end
+
+def with_slot_lock
+  File.open(SLOT_LOCK, File::RDWR | File::CREAT, 0o600) do |lock|
+    lock.flock(File::LOCK_EX)
+    yield
+  ensure
+    lock.flock(File::LOCK_UN) rescue nil
+  end
+end
+
+def random_hex(bytes)
+  File.binread("/dev/urandom", bytes).unpack1("H*")
 end
 
 def ipv4_to_i(address)
@@ -323,21 +355,26 @@ def ensure_dhcp_reservation(mac, address, hostname)
   section
 end
 
-def apply_qr_rule_change(address, node_name = nil)
-  ipv4_to_i(address)
+def apply_qr_rule_changes(changes)
+  raise "规则变更不能为空" unless changes.is_a?(Hash) && !changes.empty?
+  changes.each_key { |address| ipv4_to_i(address) }
   config = load_config
-  if node_name
-    names = Array(config["proxies"]).filter_map do |node|
-      node["name"].to_s if node.is_a?(Hash) && node["name"]
-    end
+  names = Array(config["proxies"]).filter_map do |node|
+    node["name"].to_s if node.is_a?(Hash) && node["name"]
+  end
+  changes.each_value do |node_name|
+    next if node_name.nil?
     raise "目标节点不存在：#{node_name}" unless names.include?(node_name)
   end
 
   rules = device_rules(config).reject do |rule|
     parts = rule_parts(rule)
-    parts && parts["ip"] == address
+    parts && changes.key?(parts["ip"])
   end
-  rules.unshift("SRC-IP-CIDR,#{address}/32,#{node_name}") if node_name
+  additions = changes.filter_map do |address, node_name|
+    "SRC-IP-CIDR,#{address}/32,#{node_name}" unless node_name.nil?
+  end
+  rules = additions + rules
   lines = File.read(SOURCE).gsub("\r\n", "\n").split("\n", -1)
   replace_device_rules(lines, rules)
   generated = lines.join("\n")
@@ -354,6 +391,10 @@ def apply_qr_rule_change(address, node_name = nil)
   File.chmod(mode, staged)
   File.rename(staged, SOURCE)
   backup
+end
+
+def apply_qr_rule_change(address, node_name = nil)
+  apply_qr_rule_changes(address.to_s => node_name)
 end
 
 def apply_qr_rule(address, node_name)
@@ -382,7 +423,7 @@ def qr_managed_device(mac)
   mac = mac.to_s.downcase
   raise "无效的设备 MAC 地址" unless mac.match?(/\A[0-9a-f]{2}(?::[0-9a-f]{2}){5}\z/)
   found = dhcp_host_sections.find do |section, values|
-    section.start_with?("oce_") && values["mac"].to_s.downcase == mac
+    section.start_with?("oce_") && !section.start_with?("oce_slot_") && values["mac"].to_s.downcase == mac
   end
   raise "没有找到该扫码设备，可能已经被删除" unless found
   section, values = found
@@ -400,7 +441,7 @@ def qr_devices_response
   end
   leases_by_mac = active_dhcp_leases.to_h { |lease| [lease["mac"], lease] }
   devices = dhcp_host_sections.filter_map do |section, values|
-    next unless section.start_with?("oce_")
+    next unless section.start_with?("oce_") && !section.start_with?("oce_slot_")
     mac = values["mac"].to_s.downcase
     address = values["ip"].to_s
     next unless mac.match?(/\A[0-9a-f]{2}(?::[0-9a-f]{2}){5}\z/)
@@ -531,6 +572,357 @@ def qr_devices_delete_response(mac_list, reload_openclash)
     "backup" => backup,
     "reload_openclash" => request_openclash_reload(reload_openclash)
   }
+end
+
+def slot_id!(id)
+  id = id.to_s.strip
+  raise "无效的固定槽位编号" unless id.match?(/\A[0-9a-f]{12}\z/)
+  id
+end
+
+def slot_token!(token)
+  token = token.to_s.strip
+  raise "无效的固定槽位二维码" unless token.match?(/\A[0-9a-f]{32}\z/)
+  token
+end
+
+def slot_by_id!(slots, id)
+  id = slot_id!(id)
+  slots.find { |slot| slot["id"].to_s == id } || raise("固定槽位不存在或已经删除")
+end
+
+def slot_by_token!(slots, token)
+  token = slot_token!(token)
+  slots.find { |slot| slot["token"].to_s == token } || raise("固定槽位二维码不存在或已经失效")
+end
+
+def config_node_names
+  Array(load_config["proxies"]).filter_map do |node|
+    node["name"].to_s if node.is_a?(Hash) && !node["name"].to_s.empty?
+  end
+end
+
+def dhcp_dynamic_range(network)
+  raw_start = `uci -q get dhcp.lan.start 2>/dev/null`.strip
+  raw_limit = `uci -q get dhcp.lan.limit 2>/dev/null`.strip
+  return nil unless raw_limit.match?(/\A\d+\z/) && raw_limit.to_i.positive?
+  start_i = if raw_start.include?(".")
+              ipv4_to_i(raw_start)
+            elsif raw_start.match?(/\A\d+\z/)
+              network["network_i"] + raw_start.to_i
+            end
+  return nil unless start_i && start_i.between?(network["first_i"], network["last_i"])
+  [start_i, [start_i + raw_limit.to_i - 1, network["last_i"]].min]
+rescue StandardError
+  nil
+end
+
+def slot_allocatable_ips(count)
+  lan = detect_lan
+  network = cidr_info(lan.fetch("cidr"))
+  used = {}
+  device_rules(load_config).each do |rule|
+    parts = rule_parts(rule)
+    used[ipv4_to_i(parts["ip"])] = true if parts
+  end
+  dhcp_host_sections.each_value do |values|
+    begin
+      used[ipv4_to_i(values["ip"])] = true unless values["ip"].to_s.empty?
+    rescue StandardError
+      nil
+    end
+  end
+  active_dhcp_leases.each do |lease|
+    begin
+      used[ipv4_to_i(lease["ip"])] = true
+    rescue StandardError
+      nil
+    end
+  end
+  read_slots.each do |slot|
+    begin
+      used[ipv4_to_i(slot["ip"])] = true
+    rescue StandardError
+      nil
+    end
+  end
+  used[ipv4_to_i(lan["gateway"])] = true unless lan["gateway"].to_s.empty?
+
+  saved_start = read_state["start_ip"].to_s
+  begin
+    start_i = ipv4_to_i(saved_start)
+    start_i = network["first_i"] unless start_i.between?(network["first_i"], network["last_i"])
+  rescue StandardError
+    start_i = ipv4_to_i(default_start_ip(network.merge("gateway" => lan["gateway"])))
+  end
+  candidates = (start_i..network["last_i"]).to_a + (network["first_i"]...start_i).to_a
+  dynamic_range = dhcp_dynamic_range(network)
+  if dynamic_range
+    outside, inside = candidates.partition { |value| value < dynamic_range[0] || value > dynamic_range[1] }
+    candidates = outside + inside
+  end
+  available = candidates.reject { |value| used[value] }.first(count)
+  raise "LAN 网段没有足够的空闲固定 IP，需要 #{count} 个，仅找到 #{available.length} 个" if available.length < count
+  available.map { |value| i_to_ipv4(value) }
+end
+
+def slots_response
+  config = load_config
+  rules_by_ip = {}
+  device_rules(config).each do |rule|
+    parts = rule_parts(rule)
+    rules_by_ip[parts["ip"]] = parts["name"] if parts
+  end
+  leases_by_mac = active_dhcp_leases.to_h { |lease| [lease["mac"], lease] }
+  slots = read_slots.map do |slot|
+    mac = slot["mac"].to_s.downcase
+    lease = leases_by_mac[mac]
+    slot.merge(
+      "online" => !mac.empty? && !lease.nil?,
+      "current_ip" => lease ? lease["ip"].to_s : "",
+      "rule_node" => rules_by_ip[slot["ip"].to_s].to_s,
+      "rule_ok" => rules_by_ip[slot["ip"].to_s].to_s == slot["node"].to_s
+    )
+  end
+  slots.sort_by! do |slot|
+    ipv4_to_i(slot["ip"])
+  rescue StandardError
+    0xffffffff
+  end
+  {
+    "ok" => true,
+    "slots" => slots,
+    "lan_cidr" => detect_lan["cidr"],
+    "version" => File.exist?(VERSION_FILE) ? File.read(VERSION_FILE).strip : "dev"
+  }
+end
+
+def slots_create_response(node_name, count_value, prefix_value, start_value)
+  with_slot_lock do
+    node_name = node_name.to_s.strip
+    raise "请输入已有节点的准确名称" if node_name.empty?
+    raise "目标节点不存在：#{node_name}" unless config_node_names.include?(node_name)
+    count = Integer(count_value)
+    start_number = Integer(start_value)
+    raise "单次创建数量必须在 1 至 256 之间" unless count.between?(1, 256)
+    raise "起始编号必须在 0 至 999999 之间" unless start_number.between?(0, 999_999)
+    prefix = prefix_value.to_s.strip
+    prefix = "手机槽位" if prefix.empty?
+    raise "槽位名称前缀不能包含逗号或换行" if prefix.match?(/[,\r\n]/)
+    raise "槽位名称前缀过长" if prefix.bytesize > 120
+
+    slots = read_slots
+    existing_names = slots.to_h { |slot| [slot["name"].to_s, true] }
+    names = count.times.map { |offset| "#{prefix}#{start_number + offset}" }
+    duplicate = names.find { |name| existing_names[name] }
+    raise "固定槽位名称已经存在：#{duplicate}" if duplicate
+    ips = slot_allocatable_ips(count)
+    now = Time.now.to_i
+    created = names.each_with_index.map do |name, index|
+      {
+        "id" => random_hex(6),
+        "token" => random_hex(16),
+        "name" => name,
+        "ip" => ips[index],
+        "node" => node_name,
+        "mac" => "",
+        "device_name" => "",
+        "created_at" => now,
+        "updated_at" => now,
+        "last_bound_at" => 0
+      }
+    end
+    backup = apply_qr_rule_changes(created.to_h { |slot| [slot["ip"], slot["node"]] })
+    begin
+      write_slots(slots + created)
+    rescue StandardError
+      File.binwrite(SOURCE, File.binread(backup))
+      raise
+    end
+    {
+      "ok" => true,
+      "created" => created,
+      "created_count" => created.length,
+      "backup" => backup,
+      "requires_apply" => true
+    }
+  end
+end
+
+def slot_info_response(token)
+  slot = slot_by_token!(read_slots, token)
+  {
+    "ok" => true,
+    "slot" => {
+      "name" => slot["name"].to_s,
+      "ip" => slot["ip"].to_s,
+      "node" => slot["node"].to_s,
+      "mac" => slot["mac"].to_s,
+      "device_name" => slot["device_name"].to_s
+    },
+    "permanent" => true
+  }
+end
+
+def slot_update_response(id, node_name)
+  with_slot_lock do
+    slots = read_slots
+    slot = slot_by_id!(slots, id)
+    node_name = node_name.to_s.strip
+    raise "请输入已有节点的准确名称" if node_name.empty?
+    raise "目标节点不存在：#{node_name}" unless config_node_names.include?(node_name)
+    return { "ok" => true, "slot" => slot, "unchanged" => true, "requires_apply" => false } if slot["node"].to_s == node_name
+
+    backup = apply_qr_rule_change(slot["ip"], node_name)
+    old_node = slot["node"]
+    slot["node"] = node_name
+    slot["updated_at"] = Time.now.to_i
+    begin
+      write_slots(slots)
+    rescue StandardError
+      slot["node"] = old_node
+      File.binwrite(SOURCE, File.binread(backup))
+      raise
+    end
+    { "ok" => true, "slot" => slot, "backup" => backup, "requires_apply" => true }
+  end
+end
+
+def slot_regenerate_response(id)
+  with_slot_lock do
+    slots = read_slots
+    slot = slot_by_id!(slots, id)
+    slot["token"] = random_hex(16)
+    slot["updated_at"] = Time.now.to_i
+    write_slots(slots)
+    { "ok" => true, "slot" => slot }
+  end
+end
+
+def slot_delete_response(id)
+  with_slot_lock do
+    slots = read_slots
+    slot = slot_by_id!(slots, id)
+    backup = apply_qr_rule_change(slot["ip"])
+    section = "oce_slot_#{slot['id']}"
+    begin
+      if dhcp_host_sections.key?(section)
+        unless system("uci", "-q", "delete", "dhcp.#{section}") && system("uci", "commit", "dhcp")
+          system("uci", "revert", "dhcp")
+          raise "删除槽位的 DHCP 固定租约失败"
+        end
+        system("/etc/init.d/dnsmasq", "reload") || raise("重新载入 DHCP 服务失败")
+      end
+      write_slots(slots.reject { |item| item["id"].to_s == slot["id"].to_s })
+    rescue StandardError
+      File.binwrite(SOURCE, File.binread(backup))
+      raise
+    end
+    { "ok" => true, "slot" => slot, "backup" => backup, "requires_apply" => true }
+  end
+end
+
+def safe_dhcp_name(hostname, mac)
+  name = hostname.to_s.gsub(/[^A-Za-z0-9_-]/, "")[0, 32]
+  name = "device-#{mac.delete(':')[-6, 6]}" if name.empty? || name == "*"
+  name
+end
+
+def slot_bind_response(token, remote_address)
+  with_slot_lock do
+    source_ip = lan_ip!(remote_address)
+    device = lookup_lan_device(source_ip)
+    mac = device["mac"].to_s.downcase
+    slots = read_slots
+    slot = slot_by_token!(slots, token)
+    target_ip = lan_ip!(slot["ip"])
+    raise "槽位引用的节点已经不存在：#{slot['node']}" unless config_node_names.include?(slot["node"].to_s)
+
+    sections = dhcp_host_sections
+    target_section = "oce_slot_#{slot['id']}"
+    existing_for_mac = sections.find { |_section, values| values["mac"].to_s.downcase == mac }
+    conflict_for_ip = sections.find do |section, values|
+      values["ip"].to_s == target_ip && section != target_section &&
+        !values["mac"].to_s.empty? && values["mac"].to_s.downcase != mac
+    end
+    raise "槽位固定地址 #{target_ip} 被其他 DHCP 配置占用，请先处理冲突" if conflict_for_ip
+    if existing_for_mac && !existing_for_mac[0].start_with?("oce_")
+      raise "这台设备已有用户手动创建的 DHCP 固定租约，未自动覆盖"
+    end
+
+    rules_by_ip = {}
+    device_rules(load_config).each do |rule|
+      parts = rule_parts(rule)
+      rules_by_ip[parts["ip"]] = parts["name"] if parts
+    end
+    changes = {}
+    changes[target_ip] = slot["node"].to_s if rules_by_ip[target_ip].to_s != slot["node"].to_s
+    sections_to_delete = []
+    if existing_for_mac && existing_for_mac[0] != target_section
+      previous_section, previous_values = existing_for_mac
+      sections_to_delete << previous_section
+      if previous_section.start_with?("oce_slot_")
+        previous_slot = slots.find { |item| "oce_slot_#{item['id']}" == previous_section }
+        if previous_slot
+          previous_slot["mac"] = ""
+          previous_slot["device_name"] = ""
+          previous_slot["updated_at"] = Time.now.to_i
+          previous_slot["last_bound_at"] = 0
+        end
+      elsif previous_values["ip"].to_s != target_ip
+        changes[previous_values["ip"].to_s] = nil
+      end
+    end
+    sections_to_delete << target_section if sections.key?(target_section)
+    sections_to_delete.uniq!
+
+    backup = changes.empty? ? nil : apply_qr_rule_changes(changes)
+    begin
+      sections_to_delete.each { |section| system("uci", "-q", "delete", "dhcp.#{section}") }
+      commands = [
+        ["uci", "set", "dhcp.#{target_section}=host"],
+        ["uci", "set", "dhcp.#{target_section}.name=#{safe_dhcp_name(device['hostname'], mac)}"],
+        ["uci", "set", "dhcp.#{target_section}.mac=#{mac}"],
+        ["uci", "set", "dhcp.#{target_section}.ip=#{target_ip}"],
+        ["uci", "commit", "dhcp"]
+      ]
+      unless commands.all? { |command| system(*command) }
+        system("uci", "revert", "dhcp")
+        raise "写入槽位 DHCP 固定租约失败"
+      end
+      system("/etc/init.d/dnsmasq", "reload") || raise("重新载入 DHCP 服务失败")
+
+      slots.each do |item|
+        next if item["id"].to_s == slot["id"].to_s
+        next unless item["mac"].to_s.downcase == mac
+        item["mac"] = ""
+        item["device_name"] = ""
+        item["updated_at"] = Time.now.to_i
+        item["last_bound_at"] = 0
+      end
+      slot["mac"] = mac
+      slot["device_name"] = device["hostname"].to_s
+      slot["updated_at"] = Time.now.to_i
+      slot["last_bound_at"] = Time.now.to_i
+      write_slots(slots)
+    rescue StandardError
+      File.binwrite(SOURCE, File.binread(backup)) if backup
+      raise
+    end
+
+    {
+      "ok" => true,
+      "slot" => slot,
+      "source_ip" => source_ip,
+      "ip" => target_ip,
+      "mac" => mac,
+      "hostname" => device["hostname"].to_s,
+      "backup" => backup.to_s,
+      "config_changed" => !backup.nil?,
+      "reload_openclash" => request_openclash_reload(!backup.nil?),
+      "reconnect_required" => source_ip != target_ip
+    }
+  end
 end
 
 def qr_bind_response(token, remote_address)
@@ -703,6 +1095,17 @@ def reset_response
   File.write(staged, generated)
   File.chmod(File.stat(SOURCE).mode & 0o777, staged)
   File.rename(staged, SOURCE)
+  slot_sections = SKIP_SLOT_DHCP ? [] : dhcp_host_sections.keys.select { |section| section.start_with?("oce_slot_") }
+  unless slot_sections.empty?
+    slot_sections.each { |section| system("uci", "-q", "delete", "dhcp.#{section}") }
+    unless system("uci", "commit", "dhcp")
+      system("uci", "revert", "dhcp")
+      File.binwrite(SOURCE, File.binread(backup))
+      raise "恢复初始配置时删除固定槽位 DHCP 租约失败"
+    end
+    system("/etc/init.d/dnsmasq", "reload")
+  end
+  File.delete(SLOT_STATE) if File.exist?(SLOT_STATE)
   File.delete(STATE) if File.exist?(STATE)
   { "ok" => true, "backup" => backup }
 end
@@ -817,6 +1220,13 @@ if __FILE__ == $PROGRAM_NAME
              when "qr-device-unproxy" then qr_device_unproxy_response(ARGV.fetch(1), ARGV[2] == "1")
              when "qr-device-delete" then qr_device_delete_response(ARGV.fetch(1), ARGV[2] == "1")
              when "qr-devices-delete" then qr_devices_delete_response(ARGV.fetch(1), ARGV[2] == "1")
+             when "slots" then slots_response
+             when "slots-create" then slots_create_response(ARGV.fetch(1), ARGV.fetch(2), ARGV.fetch(3), ARGV.fetch(4))
+             when "slot-info" then slot_info_response(ARGV.fetch(1))
+             when "slot-bind" then slot_bind_response(ARGV.fetch(1), ARGV.fetch(2))
+             when "slot-update" then slot_update_response(ARGV.fetch(1), ARGV.fetch(2))
+             when "slot-regenerate" then slot_regenerate_response(ARGV.fetch(1))
+             when "slot-delete" then slot_delete_response(ARGV.fetch(1))
              else raise "未知操作"
              end
     puts json_generate(result)

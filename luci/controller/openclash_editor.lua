@@ -58,6 +58,10 @@ function index()
 		template("openclash_editor/qr"), _("扫码绑定"), 87)
 	qr_page.leaf = true
 	qr_page.acl_depends = { "luci-app-openclash" }
+	local slots_page = entry({"admin", "services", "openclash", "visual-editor-slots"},
+		template("openclash_editor/slots"), _("固定槽位"), 88)
+	slots_page.leaf = true
+	slots_page.acl_depends = { "luci-app-openclash" }
 	entry({"admin", "services", "openclash", "visual-editor-state"}, call("action_state")).leaf = true
 	entry({"admin", "services", "openclash", "visual-editor-preview"}, call("action_preview")).leaf = true
 	entry({"admin", "services", "openclash", "visual-editor-apply"}, call("action_apply")).leaf = true
@@ -71,6 +75,11 @@ function index()
 	entry({"admin", "services", "openclash", "visual-editor-qr-unproxy"}, call("action_qr_unproxy")).leaf = true
 	entry({"admin", "services", "openclash", "visual-editor-qr-delete"}, call("action_qr_delete")).leaf = true
 	entry({"admin", "services", "openclash", "visual-editor-qr-delete-bulk"}, call("action_qr_delete_bulk")).leaf = true
+	entry({"admin", "services", "openclash", "visual-editor-slots-list"}, call("action_slots_list")).leaf = true
+	entry({"admin", "services", "openclash", "visual-editor-slots-create"}, call("action_slots_create")).leaf = true
+	entry({"admin", "services", "openclash", "visual-editor-slot-update"}, call("action_slot_update")).leaf = true
+	entry({"admin", "services", "openclash", "visual-editor-slot-regenerate"}, call("action_slot_regenerate")).leaf = true
+	entry({"admin", "services", "openclash", "visual-editor-slot-delete"}, call("action_slot_delete")).leaf = true
 	entry({"openclash-editor-bind"}, call("action_qr_bind")).leaf = true
 	entry({"oeb"}, call("action_qr_bind")).leaf = true
 end
@@ -203,6 +212,75 @@ function action_qr_delete_bulk()
 	if not ok then reply(false, { error = "批量删除扫码设备失败", details = err }) end
 end
 
+function action_slots_list()
+	local ok, err = xpcall(function()
+		local result, backend_err, details = run_backend("slots")
+		if not result then return reply(false, { error = backend_err, details = details }) end
+		if not result.ok then return reply(false, result) end
+		reply(true, result)
+	end, debug.traceback)
+	if not ok then reply(false, { error = "读取固定槽位失败", details = err }) end
+end
+
+function action_slots_create()
+	if not require_post() then return end
+	local ok, err = xpcall(function()
+		local node = http.formvalue("node") or ""
+		local count = http.formvalue("count") or "1"
+		local prefix = http.formvalue("prefix") or "手机槽位"
+		local start_number = http.formvalue("start") or "1"
+		if type(node) ~= "string" or node == "" or #node > 256 then
+			return reply(false, { error = "请输入已有节点名称" })
+		end
+		if type(prefix) ~= "string" or #prefix > 256 then
+			return reply(false, { error = "槽位名称前缀无效" })
+		end
+		if not tostring(count):match("^%d+$") or not tostring(start_number):match("^%d+$") then
+			return reply(false, { error = "数量和起始编号必须是整数" })
+		end
+		local command = "slots-create " .. shellquote(node) .. " " .. shellquote(count) ..
+			" " .. shellquote(prefix) .. " " .. shellquote(start_number)
+		local result, backend_err, details = run_backend(command)
+		if not result then return reply(false, { error = backend_err, details = details }) end
+		if not result.ok then return reply(false, result) end
+		reply(true, result)
+	end, debug.traceback)
+	if not ok then reply(false, { error = "创建固定槽位失败", details = err }) end
+end
+
+local function slot_id_action(command, include_node)
+	if not require_post() then return end
+	local id = http.formvalue("id") or ""
+	local node = http.formvalue("node") or ""
+	if type(id) ~= "string" or not id:match("^[0-9a-f]+$") or #id ~= 12 then
+		return reply(false, { error = "固定槽位编号无效" })
+	end
+	if include_node and (type(node) ~= "string" or node == "" or #node > 256) then
+		return reply(false, { error = "请输入已有节点名称" })
+	end
+	local backend_command = command .. " " .. shellquote(id)
+	if include_node then backend_command = backend_command .. " " .. shellquote(node) end
+	local result, backend_err, details = run_backend(backend_command)
+	if not result then return reply(false, { error = backend_err, details = details }) end
+	if not result.ok then return reply(false, result) end
+	reply(true, result)
+end
+
+function action_slot_update()
+	local ok, err = xpcall(function() slot_id_action("slot-update", true) end, debug.traceback)
+	if not ok then reply(false, { error = "修改固定槽位失败", details = err }) end
+end
+
+function action_slot_regenerate()
+	local ok, err = xpcall(function() slot_id_action("slot-regenerate", false) end, debug.traceback)
+	if not ok then reply(false, { error = "重置固定槽位二维码失败", details = err }) end
+end
+
+function action_slot_delete()
+	local ok, err = xpcall(function() slot_id_action("slot-delete", false) end, debug.traceback)
+	if not ok then reply(false, { error = "删除固定槽位失败", details = err }) end
+end
+
 local function qr_bind_page(title, body, tone)
 	local color = tone == "ok" and "#08783e" or tone == "warn" and "#9a5a00" or "#b42318"
 	http.prepare_content("text/html; charset=utf-8")
@@ -214,11 +292,21 @@ local function qr_bind_page(title, body, tone)
 end
 
 local function qr_bind_impl()
-	local token = http.formvalue("t")
+	local slot_mode = false
+	local token = http.formvalue("s")
 	if type(token) == "table" then token = token[1] end
 	if type(token) ~= "string" or token == "" then
-		token = http.formvalue("token")
+		token = http.formvalue("slot_token")
 		if type(token) == "table" then token = token[1] end
+	end
+	if type(token) == "string" and token ~= "" then slot_mode = true end
+	if not slot_mode then
+		token = http.formvalue("t")
+		if type(token) == "table" then token = token[1] end
+		if type(token) ~= "string" or token == "" then
+			token = http.formvalue("token")
+			if type(token) == "table" then token = token[1] end
+		end
 	end
 	if type(token) ~= "string" then token = "" end
 	if not token:match("^[0-9a-f]+$") or #token ~= 32 then
@@ -226,10 +314,25 @@ local function qr_bind_impl()
 	end
 
 	if http.getenv("REQUEST_METHOD") ~= "POST" then
-		local result, err, details = run_backend("qr-info " .. shellquote(token))
+		local info_command = slot_mode and "slot-info " or "qr-info "
+		local result, err, details = run_backend(info_command .. shellquote(token))
 		if not result or not result.ok then
 			local message = result and result.error or err or details or "二维码不可用"
 			return qr_bind_page("二维码不可用", "<p>" .. util.pcdata(message) .. "</p>", "error")
+		end
+		if slot_mode then
+			local slot = result.slot or {}
+			local bound = slot.mac and slot.mac ~= "" and
+				("<p>当前绑定：<code>" .. util.pcdata(slot.mac) .. "</code></p>") or
+				"<p>当前还没有设备占用这个槽位。</p>"
+			local form = "<p>固定槽位：<strong>" .. util.pcdata(slot.name or "") .. "</strong></p>" ..
+				"<p>固定地址：<strong>" .. util.pcdata(slot.ip or "") .. "</strong></p>" ..
+				"<p>目标节点：<strong>" .. util.pcdata(slot.node or "") .. "</strong></p>" ..
+				bound ..
+				"<p>确认后，这台手机的 MAC 会替换槽位中的旧设备。完成后请断开并重新连接 Wi-Fi。</p>" ..
+				"<form method=\"post\"><input type=\"hidden\" name=\"slot_token\" value=\"" .. util.pcdata(token) .. "\">" ..
+				"<button class=\"btn\" type=\"submit\">确认占用这个固定槽位</button></form>"
+			return qr_bind_page("固定槽位绑定", form, "warn")
 		end
 		local reload_text = result.reload_openclash and
 			"<p>确认后会写入固定 DHCP 租约和设备规则，并自动重启 OpenClash 使规则生效。</p>" or
@@ -242,19 +345,28 @@ local function qr_bind_impl()
 	end
 
 	local remote_address = http.getenv("REMOTE_ADDR") or ""
-	local result, err, details = run_backend("qr-bind " .. shellquote(token) .. " " .. shellquote(remote_address))
+	local bind_command = slot_mode and "slot-bind " or "qr-bind "
+	local result, err, details = run_backend(bind_command .. shellquote(token) .. " " .. shellquote(remote_address))
 	if not result or not result.ok then
 		local message = result and result.error or err or details or "绑定失败"
 		return qr_bind_page("绑定失败", "<p>" .. util.pcdata(message) .. "</p>", "error")
 	end
-	local next_step = result.reload_openclash and
-		"<p>OpenClash 正在后台重启，网络可能短暂中断，请等待约 30 秒。</p>" or
-		"<p>请在 OpenClash 中重新载入配置后生效。</p>"
-	if result.reconnect_required then
-		next_step = next_step .. "<p>该设备已有固定地址，请断开并重新连接一次 Wi-Fi。</p>"
+	local next_step
+	if slot_mode then
+		next_step = result.reload_openclash and
+			"<p>槽位规则已修复，OpenClash 正在后台重启。</p>" or
+			"<p>该固定槽位原有代理规则继续生效，不需要重复写入规则。</p>"
+	else
+		next_step = result.reload_openclash and
+			"<p>OpenClash 正在后台重启，网络可能短暂中断，请等待约 30 秒。</p>" or
+			"<p>请在 OpenClash 中重新载入配置后生效。</p>"
 	end
+	if result.reconnect_required then
+		next_step = next_step .. "<p><strong>请断开并重新连接一次 Wi-Fi</strong>，设备将获取槽位固定地址。</p>"
+	end
+	local result_node = result.node or (result.slot and result.slot.node) or ""
 	local body = "<p>设备 <code>" .. util.pcdata(result.mac) .. "</code> 已绑定到：</p>" ..
-		"<p><strong>" .. util.pcdata(result.node) .. "</strong>（" .. util.pcdata(result.ip) .. "/32）</p>" .. next_step
+		"<p><strong>" .. util.pcdata(result_node) .. "</strong>（" .. util.pcdata(result.ip) .. "/32）</p>" .. next_step
 	qr_bind_page("绑定成功", body, "ok")
 end
 

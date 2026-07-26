@@ -18,6 +18,7 @@ rm -f /usr/lib/lua/luci/view/openclash_editor/index.htm
 rm -f /usr/lib/lua/luci/view/openclash_editor/nodes.htm
 rm -f /usr/lib/lua/luci/view/openclash_editor/rules.htm
 rm -f /usr/lib/lua/luci/view/openclash_editor/qr.htm
+rm -f /usr/lib/lua/luci/view/openclash_editor/slots.htm
 rm -f /www/luci-static/resources/openclash-editor/converter.js
 rm -f /www/luci-static/resources/openclash-editor/editor-common.js
 rm -f /www/luci-static/resources/openclash-editor/editor.css

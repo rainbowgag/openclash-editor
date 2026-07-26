@@ -1,11 +1,11 @@
 <%+header%>
-<link rel="stylesheet" href="<%=resource%>/openclash-editor/editor.css?v=1.7.0-test.9">
+<link rel="stylesheet" href="<%=resource%>/openclash-editor/editor.css?v=1.8.0-test.1">
 <div class="oce-shell">
   <div class="oce-hero">
     <div><h2>OpenClash 可视编辑器</h2><p>节点管理 · 所有编辑先保存在浏览器草稿中</p></div>
     <div class="oce-hero-actions"><span id="version" class="oce-version">版本读取中…</span><button id="update_btn" class="btn cbi-button cbi-button-positive" type="button" style="display:none">发现新版本，立即更新</button><button id="reset_btn" class="btn cbi-button cbi-button-negative" type="button">恢复初始配置</button></div>
   </div>
-  <div class="oce-nav"><a class="active" href="<%=luci.dispatcher.build_url('admin','services','openclash','visual-editor')%>">① 节点管理</a><a href="<%=luci.dispatcher.build_url('admin','services','openclash','visual-editor-rules')%>">② 设备规则与应用</a></div>
+  <div class="oce-nav"><a class="active" href="<%=luci.dispatcher.build_url('admin','services','openclash','visual-editor')%>">① 节点管理</a><a href="<%=luci.dispatcher.build_url('admin','services','openclash','visual-editor-rules')%>">② 设备规则与应用</a><a href="<%=luci.dispatcher.build_url('admin','services','openclash','visual-editor-qr')%>">③ 一次性扫码</a><a href="<%=luci.dispatcher.build_url('admin','services','openclash','visual-editor-slots')%>">④ 固定槽位</a></div>
   <div id="status" class="oce-status"></div>
 
   <div class="oce-card oce-system">
@@ -32,7 +32,7 @@
   </div>
 </div>
 <script src="<%=resource%>/openclash-editor/converter.js?v=1.7.0-test.9"></script>
-<script src="<%=resource%>/openclash-editor/editor-common.js?v=1.7.0-test.9"></script>
+<script src="<%=resource%>/openclash-editor/editor-common.js?v=1.8.0-test.1"></script>
 <script>
 (function(){
   var E=OpenClashEditor,draft,dialer=false,bulkRename={prefix:'',start:1,configured:false},selectedNodes=Object.create(null);
