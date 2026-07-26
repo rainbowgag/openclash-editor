@@ -4,10 +4,11 @@
 
 ## 功能
 
-- 批量转换 VLESS、VMess、Hysteria2/Hy2 和 SOCKS5 节点
+- 批量转换 VLESS、VMess、Hysteria2/Hy2、Trojan/Trojan-Go 和 SOCKS5 节点
 - 可按“名称前缀 + 起始数”批量重命名本次转换的节点
 - SOCKS5 支持 `IP:端口:用户名:密码`、`socks5://用户名:密码@IP:端口`、`用户名:密码@IP:端口`
 - 支持 VLESS Reality、TLS、WS、gRPC，以及 VMess HTTP 伪装传输
+- 支持 Trojan/Trojan-Go 的 TCP、WS、gRPC、SNI、ALPN 与跳过证书校验参数
 - 可选写入 `dialer-proxy: 中转`
 - UI 将 `pr.proxies` 显示为“路由器代理节点”；列表为空时默认把新导入的首个节点加入其中
 - 扫码版添加节点时不自动生成设备规则，设备规则由扫码绑定产生

@@ -154,6 +154,60 @@
     return node;
   }
 
+  function parseTrojan(link, dialer) {
+    var lower = link.toLowerCase();
+    var scheme = lower.indexOf('trojan-go://') === 0 ? 'trojan-go://' : 'trojan://';
+    var part = splitLink(link, scheme);
+    var authority = part.authority;
+    if (authority.slice(-1) === '/') authority = authority.slice(0, -1);
+    var at = authority.lastIndexOf('@');
+    if (at <= 0) throw new Error('缺少密码或服务器');
+    var password = decode(authority.slice(0, at));
+    if (!password) throw new Error('Trojan 密码不能为空');
+    var hp = hostPort(authority.slice(at + 1), 443), p = part.params;
+    var type = network(p.get('type') || p.get('network') || 'tcp');
+    if (type === 'original') type = 'tcp';
+    if (['tcp', 'ws', 'grpc'].indexOf(type) < 0) throw new Error('Trojan 暂不支持传输类型：' + type);
+    var node = {
+      name: part.name || hp.server, type: 'trojan', server: hp.server,
+      port: hp.port, password: password, udp: bool(p.get('udp'), true), network: type
+    };
+    var sni = p.get('sni') || p.get('peer') || p.get('servername') || '';
+    if (sni) node.sni = sni;
+    var insecure = p.get('allowInsecure');
+    if (insecure === null) insecure = p.get('insecure');
+    if (insecure === null) insecure = p.get('skip-cert-verify');
+    if (bool(insecure, false)) node['skip-cert-verify'] = true;
+    var fp = p.get('fp') || p.get('fingerprint') || '';
+    if (fp) node['client-fingerprint'] = fp;
+    var alpn = p.get('alpn');
+    if (alpn) node.alpn = alpn.split(',').map(function(v) { return v.trim(); }).filter(Boolean);
+    if (type === 'ws') {
+      node['ws-opts'] = { path: decode(p.get('path') || '/') };
+      var host = p.get('host') || '';
+      if (host) node['ws-opts'].headers = { Host: host };
+    }
+    if (type === 'grpc') {
+      var service = decode(p.get('serviceName') || p.get('service_name') || '');
+      node['grpc-opts'] = {};
+      if (service) node['grpc-opts']['grpc-service-name'] = service;
+    }
+    var encryption = p.get('encryption');
+    if (encryption && encryption.toLowerCase() !== 'none') {
+      var encryptionMatch = encryption.match(/^ss;([^:;]+):(.+)$/i);
+      if (!encryptionMatch || ['aes-128-gcm', 'aes-256-gcm', 'chacha20-ietf-poly1305'].indexOf(encryptionMatch[1].toLowerCase()) < 0) {
+        throw new Error('Trojan-Go encryption 参数不受支持');
+      }
+      node['ss-opts'] = {
+        enabled: true,
+        method: encryptionMatch[1].toLowerCase(),
+        password: encryptionMatch[2]
+      };
+    }
+    if (dialer) node['dialer-proxy'] = dialer;
+    return node;
+  }
+
   function decodeUserinfo(value) {
     try { return decodeURIComponent(value || ''); }
     catch (_) { return value || ''; }
@@ -213,6 +267,7 @@
     if (lower.indexOf('vless://') === 0) return parseVless(link, dialer);
     if (lower.indexOf('vmess://') === 0) return parseVmess(link, dialer);
     if (lower.indexOf('hysteria2://') === 0 || lower.indexOf('hy2://') === 0) return parseHy2(link, dialer);
+    if (lower.indexOf('trojan://') === 0 || lower.indexOf('trojan-go://') === 0) return parseTrojan(link, dialer);
     if (lower.indexOf('socks5://') === 0 || link.indexOf('@') >= 0 || /^(\[[^\]]+\]|[^:\s]+):\d{1,5}:[^:]+:.+$/.test(link)) return parseSocks(link, dialer);
     throw new Error('不支持的节点格式');
   }
