@@ -64,6 +64,42 @@ remaining = File.read(lease_path)
 abort "activation retained the target device old lease" if remaining.downcase.include?("dc:ad:69:bc:b4:81")
 abort "activation removed an unrelated lease" unless remaining.include?("02:11:22:33:44:55")
 
+$dnsmasq_commands = []
+File.write(lease_path, <<~LEASES)
+  2000000000 aa:bb:cc:dd:ee:01 192.168.100.2 old-phone *
+  2000000001 dc:ad:69:bc:b4:81 192.168.100.147 new-phone *
+  2000000002 02:11:22:33:44:55 192.168.100.88 laptop *
+LEASES
+replacement = activate_slot_dhcp_reservation(
+  "dc:ad:69:bc:b4:81",
+  "192.168.100.2",
+  ["aa:bb:cc:dd:ee:01"]
+)
+abort "authorized old slot holder was not released" unless replacement["replaced_macs"] == ["aa:bb:cc:dd:ee:01"]
+abort "authorized rebind did not remove both stale leases" unless replacement["removed_count"] == 2
+abort "authorized rebind dnsmasq sequence is incorrect" unless $dnsmasq_commands == [
+  ["/etc/init.d/dnsmasq", "stop"],
+  ["/etc/init.d/dnsmasq", "start"]
+]
+remaining = File.read(lease_path)
+abort "authorized rebind retained old slot holder" if remaining.downcase.include?("aa:bb:cc:dd:ee:01")
+abort "authorized rebind retained new phone old lease" if remaining.downcase.include?("dc:ad:69:bc:b4:81")
+abort "authorized rebind removed an unrelated lease" unless remaining.include?("02:11:22:33:44:55")
+
+$dnsmasq_commands = []
+File.write(lease_path, <<~LEASES)
+  2000000000 aa:bb:cc:dd:ee:99 192.168.100.2 unexpected-phone *
+  2000000001 dc:ad:69:bc:b4:81 192.168.100.147 new-phone *
+LEASES
+begin
+  activate_slot_dhcp_reservation("dc:ad:69:bc:b4:81", "192.168.100.2")
+  abort "unexpected target IP holder was incorrectly released"
+rescue StandardError => error
+  abort "unexpected conflict error was unclear" unless error.message.include?("aa:bb:cc:dd:ee:99")
+end
+abort "dnsmasq changed for an unauthorized conflict" unless $dnsmasq_commands.empty?
+abort "unauthorized conflict changed lease file" unless File.read(lease_path).include?("aa:bb:cc:dd:ee:99")
+
 File.delete(config_path) if File.exist?(config_path)
 File.delete(lease_path) if File.exist?(lease_path)
 
