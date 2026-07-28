@@ -100,6 +100,25 @@ end
 abort "dnsmasq changed for an unauthorized conflict" unless $dnsmasq_commands.empty?
 abort "unauthorized conflict changed lease file" unless File.read(lease_path).include?("aa:bb:cc:dd:ee:99")
 
+$dnsmasq_commands = []
+forced_content = File.read(lease_path)
+forced = activate_slot_dhcp_reservation(
+  "dc:ad:69:bc:b4:81",
+  "192.168.100.2",
+  [],
+  true
+)
+abort "explicit rebind authorization did not reclaim mismatched target holder" unless forced["replaced_macs"] == ["aa:bb:cc:dd:ee:99"]
+abort "explicit rebind did not remove target and requester leases" unless forced["removed_count"] == 2
+abort "explicit rebind dnsmasq sequence is incorrect" unless $dnsmasq_commands == [
+  ["/etc/init.d/dnsmasq", "stop"],
+  ["/etc/init.d/dnsmasq", "start"]
+]
+remaining = File.read(lease_path)
+abort "explicit rebind retained mismatched target holder" if remaining.downcase.include?("aa:bb:cc:dd:ee:99")
+abort "explicit rebind retained requester old lease" if remaining.downcase.include?("dc:ad:69:bc:b4:81")
+abort "explicit rebind did not change the expected lease file" if remaining == forced_content
+
 File.delete(config_path) if File.exist?(config_path)
 File.delete(lease_path) if File.exist?(lease_path)
 

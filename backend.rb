@@ -471,7 +471,7 @@ def restart_dnsmasq!
   true
 end
 
-def activate_slot_dhcp_reservation(mac, target_ip, replaceable_macs = [])
+def activate_slot_dhcp_reservation(mac, target_ip, replaceable_macs = [], reclaim_target = false)
   normalized_mac = mac.to_s.downcase
   raise "无效的设备 MAC 地址" unless normalized_mac.match?(/\A[0-9a-f]{2}(?::[0-9a-f]{2}){5}\z/)
   allowed_replacements = Array(replaceable_macs).map { |item| item.to_s.downcase }.reject(&:empty?).uniq
@@ -484,7 +484,9 @@ def activate_slot_dhcp_reservation(mac, target_ip, replaceable_macs = [])
   target_conflicts = leases.select do |lease|
     lease["ip"] == target_ip && lease["mac"] != normalized_mac
   end
-  unexpected_conflict = target_conflicts.find { |lease| !allowed_replacements.include?(lease["mac"]) }
+  unexpected_conflict = target_conflicts.find do |lease|
+    !reclaim_target && !allowed_replacements.include?(lease["mac"])
+  end
   if unexpected_conflict
     raise "槽位固定地址 #{target_ip} 当前被设备 #{unexpected_conflict['mac']} 动态占用，请等待该设备释放地址或更换槽位 IP"
   end
@@ -1309,8 +1311,14 @@ def slot_bind_response(token, remote_address)
         system("uci", "revert", "dhcp")
         raise "写入槽位 DHCP 固定租约失败"
       end
-      replaceable_macs = rebind["bound"] && !rebind["same_device"] ? [slot["mac"]] : []
-      lease_result = activate_slot_dhcp_reservation(mac, target_ip, replaceable_macs)
+      replacing_device = rebind["bound"] && !rebind["same_device"]
+      replaceable_macs = replacing_device ? [slot["mac"]] : []
+      lease_result = activate_slot_dhcp_reservation(
+        mac,
+        target_ip,
+        replaceable_macs,
+        replacing_device && rebind["rebind_allowed"]
+      )
 
       slots.each do |item|
         next if item["id"].to_s == slot["id"].to_s
