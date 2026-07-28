@@ -25,6 +25,16 @@ SLOT_STATE = ENV["OPENCLASH_EDITOR_SLOT_STATE"].to_s.strip.empty? ? "/etc/opencl
 SLOT_LOCK = ENV["OPENCLASH_EDITOR_SLOT_LOCK"].to_s.strip.empty? ? "/tmp/openclash-editor-slots.lock" : ENV["OPENCLASH_EDITOR_SLOT_LOCK"].to_s
 SKIP_SLOT_DHCP = ENV["OPENCLASH_EDITOR_SKIP_SLOT_DHCP"] == "1"
 
+def dhcp_lease_file
+  override = ENV["OPENCLASH_EDITOR_DHCP_LEASE_FILE"].to_s.strip
+  return override unless override.empty?
+
+  configured = `uci -q get dhcp.@dnsmasq[0].leasefile 2>/dev/null`.strip
+  configured.empty? ? "/tmp/dhcp.leases" : configured
+rescue StandardError
+  "/tmp/dhcp.leases"
+end
+
 def json_generate(value)
   case value
   when Hash
@@ -294,8 +304,9 @@ def lan_ip!(address)
 end
 
 def lookup_lan_device(address)
-  if File.file?("/tmp/dhcp.leases")
-    File.foreach("/tmp/dhcp.leases") do |line|
+  lease_file = dhcp_lease_file
+  if File.file?(lease_file)
+    File.foreach(lease_file) do |line|
       fields = line.split
       next unless fields[2] == address
       mac = fields[1].to_s.downcase
@@ -405,8 +416,9 @@ end
 
 def active_dhcp_leases
   leases = []
-  return leases unless File.file?("/tmp/dhcp.leases")
-  File.foreach("/tmp/dhcp.leases") do |line|
+  lease_file = dhcp_lease_file
+  return leases unless File.file?(lease_file)
+  File.foreach(lease_file) do |line|
     fields = line.split
     next unless fields.length >= 4
     mac = fields[1].to_s.downcase
@@ -415,10 +427,88 @@ def active_dhcp_leases
       "expires_at" => fields[0].to_i,
       "mac" => mac,
       "ip" => fields[2].to_s,
-      "hostname" => fields[3].to_s
+      "hostname" => fields[3].to_s,
+      "client_id" => fields[4].to_s
     }
   end
   leases
+end
+
+def purge_dhcp_lease(mac, address = "")
+  normalized_mac = mac.to_s.downcase
+  raise "无效的设备 MAC 地址" unless normalized_mac.match?(/\A[0-9a-f]{2}(?::[0-9a-f]{2}){5}\z/)
+  address = address.to_s
+  ipv4_to_i(address) unless address.empty?
+
+  lease_file = dhcp_lease_file
+  return 0 unless File.file?(lease_file)
+
+  original = File.binread(lease_file)
+  removed = 0
+  retained = original.lines.reject do |line|
+    fields = line.split
+    matched = fields.length >= 3 &&
+      fields[1].to_s.downcase == normalized_mac &&
+      (address.empty? || fields[2].to_s == address)
+    removed += 1 if matched
+    matched
+  end
+  return 0 if removed.zero?
+
+  temporary = "#{lease_file}.openclash-editor-#{Process.pid}"
+  begin
+    File.binwrite(temporary, retained.join)
+    File.chmod(File.stat(lease_file).mode & 0o777, temporary)
+    File.rename(temporary, lease_file)
+  ensure
+    File.delete(temporary) if File.exist?(temporary)
+  end
+  removed
+end
+
+def restart_dnsmasq!
+  system("/etc/init.d/dnsmasq", "restart") || raise("重启 DHCP 服务失败")
+  true
+end
+
+def activate_slot_dhcp_reservation(mac, target_ip)
+  normalized_mac = mac.to_s.downcase
+  raise "无效的设备 MAC 地址" unless normalized_mac.match?(/\A[0-9a-f]{2}(?::[0-9a-f]{2}){5}\z/)
+  target_ip = lan_ip!(target_ip)
+  leases = active_dhcp_leases
+  current = leases.find { |lease| lease["mac"] == normalized_mac }
+  target_conflict = leases.find do |lease|
+    lease["ip"] == target_ip && lease["mac"] != normalized_mac
+  end
+  if target_conflict
+    raise "槽位固定地址 #{target_ip} 当前被设备 #{target_conflict['mac']} 动态占用，请等待该设备释放地址或更换槽位 IP"
+  end
+
+  old_ip = current ? current["ip"].to_s : ""
+  removed = 0
+  if !old_ip.empty? && old_ip != target_ip
+    stopped = false
+    begin
+      system("/etc/init.d/dnsmasq", "stop") || raise("停止 DHCP 服务以释放旧租约失败")
+      stopped = true
+      removed = purge_dhcp_lease(normalized_mac, old_ip)
+      system("/etc/init.d/dnsmasq", "start") || raise("启动 DHCP 服务失败")
+      stopped = false
+    ensure
+      system("/etc/init.d/dnsmasq", "start") if stopped
+    end
+  else
+    restart_dnsmasq!
+  end
+
+  {
+    "old_ip" => old_ip,
+    "target_ip" => target_ip,
+    "lease_removed" => removed.positive?,
+    "removed_count" => removed,
+    "dnsmasq_restarted" => true,
+    "reconnect_required" => old_ip != target_ip
+  }
 end
 
 def qr_managed_device(mac)
@@ -1006,6 +1096,35 @@ def slot_rebind_response(id, enabled)
   end
 end
 
+def slot_refresh_lease_response(id)
+  with_slot_lock do
+    slots = read_slots
+    slot = slot_by_id!(slots, id)
+    mac = slot["mac"].to_s.downcase
+    raise "该扫码槽位还没有绑定设备" if mac.empty?
+    target_ip = lan_ip!(slot["ip"])
+    section = "oce_slot_#{slot['id']}"
+    values = dhcp_host_sections[section]
+    unless values &&
+      values["mac"].to_s.downcase == mac &&
+      values["ip"].to_s == target_ip
+      raise "该槽位的 DHCP 固定租约缺失或不一致，请让原手机重新扫描该槽位二维码"
+    end
+
+    lease_result = activate_slot_dhcp_reservation(mac, target_ip)
+    {
+      "ok" => true,
+      "slot" => slot,
+      "mac" => mac,
+      "ip" => target_ip,
+      "old_ip" => lease_result["old_ip"],
+      "lease_removed" => lease_result["lease_removed"],
+      "dnsmasq_restarted" => lease_result["dnsmasq_restarted"],
+      "reconnect_required" => lease_result["reconnect_required"]
+    }
+  end
+end
+
 def slot_delete_response(id)
   with_slot_lock do
     slots = read_slots
@@ -1165,6 +1284,7 @@ def slot_bind_response(token, remote_address)
     sections_to_delete.uniq!
 
     backup = changes.empty? ? nil : apply_qr_rule_changes(changes)
+    lease_result = nil
     begin
       sections_to_delete.each { |section| system("uci", "-q", "delete", "dhcp.#{section}") }
       commands = [
@@ -1178,7 +1298,7 @@ def slot_bind_response(token, remote_address)
         system("uci", "revert", "dhcp")
         raise "写入槽位 DHCP 固定租约失败"
       end
-      system("/etc/init.d/dnsmasq", "reload") || raise("重新载入 DHCP 服务失败")
+      lease_result = activate_slot_dhcp_reservation(mac, target_ip)
 
       slots.each do |item|
         next if item["id"].to_s == slot["id"].to_s
@@ -1212,6 +1332,9 @@ def slot_bind_response(token, remote_address)
       "same_device" => rebind["same_device"],
       "replaced_device" => rebind["bound"] && !rebind["same_device"],
       "reload_openclash" => request_openclash_reload(!backup.nil?),
+      "old_ip" => lease_result ? lease_result["old_ip"] : source_ip,
+      "lease_removed" => lease_result ? lease_result["lease_removed"] : false,
+      "dnsmasq_restarted" => lease_result ? lease_result["dnsmasq_restarted"] : false,
       "reconnect_required" => source_ip != target_ip
     }
   end
@@ -1601,6 +1724,7 @@ if __FILE__ == $PROGRAM_NAME
              when "slot-update" then slot_update_response(ARGV.fetch(1), ARGV.fetch(2))
              when "slot-regenerate" then slot_regenerate_response(ARGV.fetch(1))
              when "slot-rebind" then slot_rebind_response(ARGV.fetch(1), ARGV.fetch(2))
+             when "slot-refresh-lease" then slot_refresh_lease_response(ARGV.fetch(1))
              when "slot-delete" then slot_delete_response(ARGV.fetch(1))
              when "slots-delete" then slots_delete_response(ARGV.fetch(1))
              else raise "未知操作"

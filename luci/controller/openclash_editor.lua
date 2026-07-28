@@ -75,6 +75,7 @@ function index()
 	entry({"admin", "services", "openclash", "visual-editor-slot-update"}, call("action_slot_update")).leaf = true
 	entry({"admin", "services", "openclash", "visual-editor-slot-regenerate"}, call("action_slot_regenerate")).leaf = true
 	entry({"admin", "services", "openclash", "visual-editor-slot-rebind"}, call("action_slot_rebind")).leaf = true
+	entry({"admin", "services", "openclash", "visual-editor-slot-refresh-lease"}, call("action_slot_refresh_lease")).leaf = true
 	entry({"admin", "services", "openclash", "visual-editor-slot-delete"}, call("action_slot_delete")).leaf = true
 	entry({"admin", "services", "openclash", "visual-editor-slots-delete"}, call("action_slots_delete")).leaf = true
 	entry({"openclash-editor-bind"}, call("action_qr_bind")).leaf = true
@@ -335,6 +336,11 @@ function action_slot_rebind()
 	if not ok then reply(false, { error = "修改换绑授权失败", details = err }) end
 end
 
+function action_slot_refresh_lease()
+	local ok, err = xpcall(function() slot_id_action("slot-refresh-lease", false) end, debug.traceback)
+	if not ok then reply(false, { error = "刷新扫码槽位 IP 租约失败", details = err }) end
+end
+
 function action_slot_delete()
 	local ok, err = xpcall(function() slot_id_action("slot-delete", false) end, debug.traceback)
 	if not ok then reply(false, { error = "删除扫码槽位失败", details = err }) end
@@ -425,7 +431,8 @@ local function qr_bind_impl()
 		"<p>槽位规则已修复，OpenClash 正在后台重启。</p>" or
 		"<p>该扫码槽位原有代理规则继续生效，不需要重复写入规则。</p>"
 	if result.reconnect_required then
-		next_step = next_step .. "<p><strong>请断开并重新连接一次 Wi-Fi</strong>，设备将获取槽位固定地址。</p>"
+		next_step = next_step .. "<p>旧 DHCP 租约已经释放。</p>" ..
+			"<p><strong>请关闭手机 Wi-Fi 约 5 秒后重新打开</strong>，设备将获取槽位固定地址。</p>"
 	end
 	local result_node = result.node or (result.slot and result.slot.node) or ""
 	local body = "<p>设备 <code>" .. util.pcdata(result.mac) .. "</code> 已绑定到：</p>" ..

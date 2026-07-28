@@ -1,5 +1,5 @@
 <%+header%>
-<link rel="stylesheet" href="<%=resource%>/openclash-editor/editor.css?v=2.1.0">
+<link rel="stylesheet" href="<%=resource%>/openclash-editor/editor.css?v=2.1.1">
 <style>
   .oce-slot-grid{display:grid;grid-template-columns:minmax(340px,1fr) minmax(320px,1fr);gap:20px}
   .oce-slot-create{display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:14px;align-items:end}
@@ -99,7 +99,7 @@
     </div>
   </section>
 </div>
-<script src="<%=resource%>/openclash-editor/editor-common.js?v=2.1.0"></script>
+<script src="<%=resource%>/openclash-editor/editor-common.js?v=2.1.1"></script>
 <script>
 (function(){
   var E=OpenClashEditor;
@@ -111,6 +111,7 @@
     update:'<%=luci.dispatcher.build_url("admin","services","openclash","visual-editor-slot-update")%>',
     regenerate:'<%=luci.dispatcher.build_url("admin","services","openclash","visual-editor-slot-regenerate")%>',
     rebind:'<%=luci.dispatcher.build_url("admin","services","openclash","visual-editor-slot-rebind")%>',
+    refreshLease:'<%=luci.dispatcher.build_url("admin","services","openclash","visual-editor-slot-refresh-lease")%>',
     remove:'<%=luci.dispatcher.build_url("admin","services","openclash","visual-editor-slot-delete")%>',
     removeBulk:'<%=luci.dispatcher.build_url("admin","services","openclash","visual-editor-slots-delete")%>',
     restart:'<%=luci.dispatcher.build_url("admin","services","openclash","visual-editor-restart")%>',
@@ -122,8 +123,11 @@
   function slotRow(slot){
     var status=slot.online?'<span class="oce-online">在线</span>':'<span class="oce-offline">离线</span>';
     var lock=slot.mac?(slot.rebind_allowed?'<div class="oce-unlocked">允许换绑（约 '+Math.max(1,Math.ceil(Number(slot.rebind_remaining||0)/60))+' 分钟）</div>':'<div class="oce-locked">🔒 已锁定</div>'):'';
-    var device=slot.mac?('<strong>'+E.esc(slot.device_name||'已绑定设备')+'</strong><div class="oce-muted">'+E.esc(slot.mac)+'</div><div>'+status+(slot.current_ip?' · 当前 '+E.esc(slot.current_ip):'')+'</div>'+lock):'<span class="oce-muted">等待首次扫码，绑定后自动锁定</span>';
+    var ipMismatch=!!(slot.mac&&slot.current_ip&&slot.current_ip!==slot.ip);
+    var ipWarning=ipMismatch?('<div class="oce-error" style="margin-top:5px">当前仍使用旧 IP '+E.esc(slot.current_ip)+'，请刷新 IP 租约后重连 Wi-Fi</div>'):'';
+    var device=slot.mac?('<strong>'+E.esc(slot.device_name||'已绑定设备')+'</strong><div class="oce-muted">'+E.esc(slot.mac)+'</div><div>'+status+(slot.current_ip?' · 当前 '+E.esc(slot.current_ip):'')+'</div>'+ipWarning+lock):'<span class="oce-muted">等待首次扫码，绑定后自动锁定</span>';
     var rebindButton=slot.mac?('<button class="btn cbi-button '+(slot.rebind_allowed?'oce-danger':'cbi-button-positive')+' slot-rebind" type="button">'+(slot.rebind_allowed?'取消换绑':'允许换绑')+'</button> '):'';
+    var refreshLeaseButton=slot.mac?('<button class="btn cbi-button '+(ipMismatch?'cbi-button-action':'')+' slot-refresh-lease" type="button">刷新 IP 租约</button> '):'';
     var warning=slot.rule_ok?'':'<div class="oce-error" style="margin-top:5px">规则缺失或节点不一致</div>';
     return '<tr data-id="'+E.esc(slot.id)+'">'+
       '<td><input class="slot-select oce-check" data-id="'+E.esc(slot.id)+'" type="checkbox" '+(selectedSlots[slot.id]?'checked':'')+' aria-label="选择槽位 '+E.esc(slot.name)+'"></td>'+
@@ -132,6 +136,7 @@
       '<td><input class="oce-input oce-slot-node" list="node_names" value="'+E.esc(slot.node||'')+'" placeholder="已有节点名称"> <button class="btn cbi-button slot-update" type="button">修改</button></td>'+
       '<td><button class="btn cbi-button cbi-button-action slot-show" type="button">显示二维码</button> '+
       rebindButton+
+      refreshLeaseButton+
       '<button class="btn cbi-button slot-regenerate" type="button">重置二维码</button> '+
       '<button class="btn cbi-button oce-danger slot-delete" type="button">删除</button></td></tr>';
   }
@@ -230,6 +235,14 @@
         if(!result.ok)throw new Error(result.error+(result.details?'\n'+result.details:''));
         alert(allow?'已允许换绑，请让新手机在10分钟内扫描该槽位二维码。':'已取消换绑授权，槽位重新锁定。');return loadSlots();
       }).catch(function(error){msg('修改换绑授权失败：'+error.message,'error');event.target.disabled=false});
+    }else if(event.target.classList.contains('slot-refresh-lease')){
+      if(!confirm('确认释放“'+slot.name+'”当前设备的旧 DHCP 租约并重启 DHCP 服务？\n其他设备的租约不会被删除；操作后请让这台手机关闭 Wi-Fi 约 5 秒再重新连接。'))return;
+      event.target.disabled=true;
+      E.post(urls.refreshLease,{id:id}).then(function(result){
+        if(!result.ok)throw new Error(result.error+(result.details?'\n'+result.details:''));
+        var detail=result.old_ip&&result.old_ip!==result.ip?('已释放旧 IP '+result.old_ip+'。'):'DHCP 固定租约已重新载入。';
+        alert(detail+'\n请让这台手机关闭 Wi-Fi 约 5 秒后重新连接，随后刷新列表确认当前 IP 为 '+result.ip+'。');return loadSlots();
+      }).catch(function(error){msg('刷新 IP 租约失败：'+error.message,'error');event.target.disabled=false});
     }else if(event.target.classList.contains('slot-update')){
       var node=row.querySelector('.oce-slot-node').value.trim();
       if(knownNodes.indexOf(node)<0){msg('节点名称不存在，请准确输入正式配置中的已有节点名称','error');return}
