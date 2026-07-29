@@ -6,6 +6,8 @@ local fs = require "nixio.fs"
 local sys = require "luci.sys"
 local util = require "luci.util"
 local uci_model = require "luci.model.uci"
+local xml_ok, xml = pcall(require, "luci.xml")
+local pcdata = xml_ok and xml.pcdata or util.pcdata
 
 local test_path = "/tmp/openclash-editor-preview.yaml"
 local request_path = "/tmp/openclash-editor-request.json"
@@ -100,6 +102,12 @@ end
 local function run_backend(command)
 	local output = sys.exec("ruby " .. shellquote(backend_path) .. " " .. command .. " 2>&1")
 	local parsed = json.parse(output)
+	if not parsed then
+		for line in tostring(output):gmatch("[^\r\n]+") do
+			local candidate = json.parse(line)
+			if candidate then parsed = candidate end
+		end
+	end
 	if not parsed then return nil, "后端没有返回有效 JSON", output end
 	return parsed
 end
@@ -367,9 +375,9 @@ local function qr_bind_page(title, body, tone)
 	http.prepare_content("text/html; charset=utf-8")
 	http.write("<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">")
 	http.write("<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">")
-	http.write("<title>" .. util.pcdata(title) .. "</title>")
+	http.write("<title>" .. pcdata(title) .. "</title>")
 	http.write("<style>body{margin:0;background:#f4f7fb;color:#15254b;font:16px/1.65 sans-serif}.box{max-width:560px;margin:9vh auto;padding:28px;background:#fff;border-radius:18px;box-shadow:0 12px 40px #15254b22}.state{border-left:6px solid " .. color .. ";padding-left:18px}h1{font-size:26px;margin:0 0 16px}.btn{display:block;width:100%;box-sizing:border-box;margin-top:24px;padding:15px;border:0;border-radius:10px;background:#2867e8;color:#fff;font-weight:700;font-size:17px}code{word-break:break-all}</style>")
-	http.write("</head><body><main class=\"box\"><div class=\"state\"><h1>" .. util.pcdata(title) .. "</h1>" .. body .. "</div></main></body></html>")
+	http.write("</head><body><main class=\"box\"><div class=\"state\"><h1>" .. pcdata(title) .. "</h1>" .. body .. "</div></main></body></html>")
 end
 
 local function qr_bind_impl()
@@ -388,16 +396,16 @@ local function qr_bind_impl()
 		local remote_address = http.getenv("REMOTE_ADDR") or ""
 		local result, err, details = run_backend("slot-info " .. shellquote(token) .. " " .. shellquote(remote_address))
 		if not result or not result.ok then
-			local message = result and result.error or err or details or "二维码不可用"
-			return qr_bind_page("二维码不可用", "<p>" .. util.pcdata(message) .. "</p>", "error")
+			local message = result and result.error or (details and details ~= "" and details) or err or "二维码不可用"
+			return qr_bind_page("二维码不可用", "<p>" .. pcdata(message) .. "</p>", "error")
 		end
 		local slot = result.slot or {}
 		local bound = slot.mac and slot.mac ~= "" and
-			("<p>当前绑定：<code>" .. util.pcdata(slot.mac) .. "</code></p>") or
+			("<p>当前绑定：<code>" .. pcdata(slot.mac) .. "</code></p>") or
 			"<p>当前还没有设备占用这个槽位。</p>"
-		local summary = "<p>扫码槽位：<strong>" .. util.pcdata(slot.name or "") .. "</strong></p>" ..
-			"<p>固定地址：<strong>" .. util.pcdata(slot.ip or "") .. "</strong></p>" ..
-			"<p>目标节点：<strong>" .. util.pcdata(slot.node or "") .. "</strong></p>" ..
+		local summary = "<p>扫码槽位：<strong>" .. pcdata(slot.name or "") .. "</strong></p>" ..
+			"<p>固定地址：<strong>" .. pcdata(slot.ip or "") .. "</strong></p>" ..
+			"<p>目标节点：<strong>" .. pcdata(slot.node or "") .. "</strong></p>" ..
 			bound
 		if not result.can_bind then
 			local detail = "<p><strong>该槽位已经锁定，当前手机不能替换原设备。</strong></p>" ..
@@ -416,7 +424,7 @@ local function qr_bind_impl()
 		end
 		local form = summary .. notice ..
 			"<p>完成后请断开并重新连接 Wi-Fi。</p>" ..
-			"<form method=\"post\"><input type=\"hidden\" name=\"slot_token\" value=\"" .. util.pcdata(token) .. "\">" ..
+			"<form method=\"post\"><input type=\"hidden\" name=\"slot_token\" value=\"" .. pcdata(token) .. "\">" ..
 			"<button class=\"btn\" type=\"submit\">确认绑定这个扫码槽位</button></form>"
 		return qr_bind_page("扫码绑定", form, "warn")
 	end
@@ -424,8 +432,8 @@ local function qr_bind_impl()
 	local remote_address = http.getenv("REMOTE_ADDR") or ""
 	local result, err, details = run_backend("slot-bind " .. shellquote(token) .. " " .. shellquote(remote_address))
 	if not result or not result.ok then
-		local message = result and result.error or err or details or "绑定失败"
-		return qr_bind_page("绑定失败", "<p>" .. util.pcdata(message) .. "</p>", "error")
+		local message = result and result.error or (details and details ~= "" and details) or err or "绑定失败"
+		return qr_bind_page("绑定失败", "<p>" .. pcdata(message) .. "</p>", "error")
 	end
 	local next_step = result.reload_openclash and
 		"<p>槽位规则已修复，OpenClash 正在后台重启。</p>" or
@@ -435,14 +443,14 @@ local function qr_bind_impl()
 			"<p><strong>请关闭手机 Wi-Fi 约 5 秒后重新打开</strong>，设备将获取槽位固定地址。</p>"
 	end
 	local result_node = result.node or (result.slot and result.slot.node) or ""
-	local body = "<p>设备 <code>" .. util.pcdata(result.mac) .. "</code> 已绑定到：</p>" ..
-		"<p><strong>" .. util.pcdata(result_node) .. "</strong>（" .. util.pcdata(result.ip) .. "/32）</p>" .. next_step
+	local body = "<p>设备 <code>" .. pcdata(result.mac) .. "</code> 已绑定到：</p>" ..
+		"<p><strong>" .. pcdata(result_node) .. "</strong>（" .. pcdata(result.ip) .. "/32）</p>" .. next_step
 	qr_bind_page("绑定成功", body, "ok")
 end
 
 function action_qr_bind()
 	local ok, err = xpcall(qr_bind_impl, debug.traceback)
-	if not ok then qr_bind_page("绑定失败", "<p>" .. util.pcdata(err) .. "</p>", "error") end
+	if not ok then qr_bind_page("绑定失败", "<p>" .. pcdata(err) .. "</p>", "error") end
 end
 
 local function preview_impl()
