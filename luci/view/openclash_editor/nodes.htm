@@ -10,7 +10,7 @@
 
   <div class="oce-card oce-system">
     <div class="oce-actions" style="justify-content:space-between"><h3>批量添加节点</h3><div class="oce-actions"><label class="oce-check-label"><input id="bulk_rename_enabled" class="oce-check" type="checkbox"> 批量修改节点名称</label><button id="bulk_rename_btn" class="btn cbi-button" type="button" disabled>批量更改节点名称</button></div></div>
-    <div class="oce-grid"><div><label for="links"><strong>节点链接（每行一条）</strong></label><textarea id="links" class="oce-input oce-code" rows="10" placeholder="vless://...&#10;vmess://...&#10;hysteria2://...&#10;trojan://...&#10;trojan-go://...&#10;socks5://用户名:密码@IP:端口"></textarea></div><div><p><strong>支持协议：</strong>VLESS、VMess、Hysteria2/Hy2、Trojan/Trojan-Go、SOCKS5</p><div class="oce-actions"><label class="oce-check-label"><input id="add_to_pr" class="oce-check" type="checkbox"> 自动将首个节点设为路由器代理节点</label><label class="oce-check-label"><input id="auto_rules" class="oce-check" type="checkbox" checked> 自动匹配设备规则</label></div><div class="oce-actions" style="margin-top:16px"><button id="dialer_btn" class="btn cbi-button" type="button">添加前置代理</button><button id="import_btn" class="btn cbi-button cbi-button-action" type="button">转换并添加节点</button><button id="clear_btn" class="btn cbi-button" type="button">清空</button></div><p id="dialer_hint" class="oce-muted">前置代理未启用；启用后固定添加 <code>dialer-proxy: 中转</code>。</p></div></div>
+    <div class="oce-grid"><div><label for="links"><strong>节点链接（每行一条）</strong></label><textarea id="links" class="oce-input oce-code" rows="10" placeholder="vless://...&#10;vmess://...&#10;hysteria2://...&#10;trojan://...&#10;trojan-go://...&#10;socks5://用户名:密码@IP:端口&#10;socks://Base64认证@IP:端口"></textarea></div><div><p><strong>支持协议：</strong>VLESS、VMess、Hysteria2/Hy2、Trojan/Trojan-Go、SOCKS5</p><div class="oce-actions"><label class="oce-check-label"><input id="add_to_pr" class="oce-check" type="checkbox"> 自动将首个节点设为路由器代理节点</label><label class="oce-check-label"><input id="auto_rules" class="oce-check" type="checkbox" checked> 自动匹配设备规则</label></div><div class="oce-actions" style="margin-top:16px"><button id="dialer_btn" class="btn cbi-button" type="button">添加前置代理</button><button id="import_btn" class="btn cbi-button cbi-button-action" type="button">转换并添加节点</button><button id="clear_btn" class="btn cbi-button" type="button">清空</button></div><p id="dialer_hint" class="oce-muted">前置代理未启用；启用后固定添加 <code>dialer-proxy: 中转</code>。</p></div></div>
   </div>
 
   <div id="bulk_rename_modal" style="display:none;position:fixed;z-index:10000;inset:0;background:rgba(15,23,42,.55);align-items:center;justify-content:center;padding:20px">
@@ -31,8 +31,8 @@
     <div class="oce-actions" style="margin-top:14px"><a class="btn cbi-button cbi-button-action" href="<%=luci.dispatcher.build_url('admin','services','openclash','visual-editor-rules')%>">下一步：管理规则与应用 →</a></div>
   </div>
 </div>
-<script src="<%=resource%>/openclash-editor/converter.js?v=1.6.2-manual.3"></script>
-<script src="<%=resource%>/openclash-editor/editor-common.js?v=1.6.2-manual.3"></script>
+<script src="<%=resource%>/openclash-editor/converter.js?v=1.6.2-manual.4"></script>
+<script src="<%=resource%>/openclash-editor/editor-common.js?v=1.6.2-manual.4"></script>
 <script>
 (function(){
   var E=OpenClashEditor,draft,dialer=false,bulkRename={prefix:'',start:1,configured:false},selectedNodes=Object.create(null);

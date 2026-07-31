@@ -6,7 +6,7 @@
 
 - 批量转换 VLESS、VMess、Hysteria2/Hy2、Trojan/Trojan-Go 和 SOCKS5 节点
 - 可按“名称前缀 + 起始数”批量重命名本次转换的节点
-- SOCKS5 支持 `IP:端口:用户名:密码`、`socks5://用户名:密码@IP:端口`、`用户名:密码@IP:端口`
+- SOCKS5 支持 `IP:端口:用户名:密码`、`socks5://用户名:密码@IP:端口`、`用户名:密码@IP:端口`、`socks://Base64(用户名:密码)@IP:端口#节点名`
 - 支持 VLESS Reality、TLS、WS、gRPC，以及 VMess HTTP 伪装传输
 - 支持 Trojan/Trojan-Go 的 TCP、WS、gRPC、SNI、ALPN 与跳过证书校验参数
 - 可选写入 `dialer-proxy: 中转`
