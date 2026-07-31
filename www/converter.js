@@ -232,14 +232,33 @@
     };
   }
 
+  function socksBase64Credentials(value) {
+    var payload = decodeUserinfo(value).replace(/-/g, '+').replace(/_/g, '/').replace(/\s+/g, '');
+    if (!payload || !/^[A-Za-z0-9+/]*={0,2}$/.test(payload)) {
+      throw new Error('SOCKS Base64 用户信息格式错误');
+    }
+    while (payload.length % 4) payload += '=';
+    try {
+      var binary = atob(payload);
+      var bytes = Uint8Array.from(binary, function(ch) { return ch.charCodeAt(0); });
+      return socksCredentials(new TextDecoder('utf-8').decode(bytes));
+    } catch (_) {
+      throw new Error('SOCKS Base64 用户信息无法解码为用户名和密码');
+    }
+  }
+
   function parseSocks(link, dialer) {
     var value = link.trim(), lower = value.toLowerCase();
     var hp, credentials, name = '';
-    if (lower.indexOf('socks5://') === 0) {
-      var part = splitLink(value, 'socks5://');
+    if (lower.indexOf('socks5://') === 0 || lower.indexOf('socks://') === 0) {
+      var scheme = lower.indexOf('socks5://') === 0 ? 'socks5://' : 'socks://';
+      var part = splitLink(value, scheme);
       var schemeAt = part.authority.lastIndexOf('@');
-      if (schemeAt <= 0) throw new Error('SOCKS5 链接缺少用户名、密码或服务器');
-      credentials = socksCredentials(part.authority.slice(0, schemeAt));
+      if (schemeAt <= 0) throw new Error('SOCKS 链接缺少用户名、密码或服务器');
+      var userinfo = part.authority.slice(0, schemeAt);
+      var decodedUserinfo = decodeUserinfo(userinfo);
+      credentials = scheme === 'socks://' && decodedUserinfo.indexOf(':') < 0 ?
+        socksBase64Credentials(decodedUserinfo) : socksCredentials(decodedUserinfo);
       hp = socksHostPort(part.authority.slice(schemeAt + 1));
       name = part.name;
     } else if (value.indexOf('@') >= 0) {
@@ -268,7 +287,7 @@
     if (lower.indexOf('vmess://') === 0) return parseVmess(link, dialer);
     if (lower.indexOf('hysteria2://') === 0 || lower.indexOf('hy2://') === 0) return parseHy2(link, dialer);
     if (lower.indexOf('trojan://') === 0 || lower.indexOf('trojan-go://') === 0) return parseTrojan(link, dialer);
-    if (lower.indexOf('socks5://') === 0 || link.indexOf('@') >= 0 || /^(\[[^\]]+\]|[^:\s]+):\d{1,5}:[^:]+:.+$/.test(link)) return parseSocks(link, dialer);
+    if (lower.indexOf('socks5://') === 0 || lower.indexOf('socks://') === 0 || link.indexOf('@') >= 0 || /^(\[[^\]]+\]|[^:\s]+):\d{1,5}:[^:]+:.+$/.test(link)) return parseSocks(link, dialer);
     throw new Error('不支持的节点格式');
   }
 
