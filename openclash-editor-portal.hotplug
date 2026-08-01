@@ -1,0 +1,6 @@
+#!/bin/sh
+
+[ "$INTERFACE" = "lan" ] || exit 0
+case "$ACTION" in
+	ifup|ifupdate) /etc/init.d/openclash-editor-portal restart >/dev/null 2>&1 & ;;
+esac

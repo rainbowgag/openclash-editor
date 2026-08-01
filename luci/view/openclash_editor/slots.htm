@@ -1,55 +1,51 @@
 <%+header%>
-<link rel="stylesheet" href="<%=resource%>/openclash-editor/editor.css?v=2.1.1">
+<link rel="stylesheet" href="<%=resource%>/openclash-editor/editor.css?v=2.2.0">
 <style>
-  .oce-slot-grid{display:grid;grid-template-columns:minmax(340px,1fr) minmax(320px,1fr);gap:20px}
   .oce-slot-create{display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:14px;align-items:end}
-  .oce-slot-qr{min-height:350px;display:flex;align-items:center;justify-content:center;flex-direction:column;text-align:center}
-  .oce-slot-qr svg{width:auto;height:auto;max-width:100%;shape-rendering:crispEdges;image-rendering:pixelated;border:12px solid #fff;border-radius:12px;box-shadow:0 8px 28px #15254b22}
-  .oce-slot-url{max-width:100%;word-break:break-all;margin-top:14px}
-  .oce-slot-node{min-width:190px}
+  .oce-slot-node{min-width:190px}.oce-code{display:inline-block;min-width:58px;padding:6px 10px;border:2px solid #2867e8;border-radius:9px;background:#eef4ff;color:#164db9;font-size:20px;font-weight:900;letter-spacing:.16em;text-align:center}
   .oce-online{color:#08783e;font-weight:700}.oce-offline{color:#7a879e;font-weight:700}
-  .oce-locked{color:#9a5a00;font-weight:700}.oce-unlocked{color:#b42318;font-weight:700}
-  @media(max-width:960px){.oce-slot-grid{grid-template-columns:1fr}.oce-slot-create{grid-template-columns:1fr 1fr}}
+  .oce-steps{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.oce-step{padding:16px;border-radius:12px;background:#eef4ff;color:#17376f;font-weight:700}
+  @media(max-width:960px){.oce-slot-create{grid-template-columns:1fr 1fr}.oce-steps{grid-template-columns:1fr}}
   @media(max-width:560px){.oce-slot-create{grid-template-columns:1fr}}
 </style>
 <div class="oce-shell">
   <div class="oce-hero">
-    <div><h2>扫码绑定</h2><p>节点绑定固定 IP · 手机扫码换绑 MAC · 槽位和二维码长期复用</p></div>
+    <div><h2>口令绑定</h2><p>新设备自动弹窗 · 输入 001 起的槽位口令 · 刷机后直接替换原 MAC</p></div>
     <div class="oce-hero-actions"><span id="version" class="oce-version"></span></div>
   </div>
   <div class="oce-nav">
     <a href="<%=luci.dispatcher.build_url('admin','services','openclash','visual-editor')%>">① 节点管理</a>
     <a href="<%=luci.dispatcher.build_url('admin','services','openclash','visual-editor-rules')%>">② 设备规则与应用</a>
-    <a class="active" href="<%=luci.dispatcher.build_url('admin','services','openclash','visual-editor-qr')%>">③ 扫码绑定</a>
+    <a class="active" href="<%=luci.dispatcher.build_url('admin','services','openclash','visual-editor-qr')%>">③ 口令绑定</a>
   </div>
   <div id="status" class="oce-status"></div>
 
-  <section class="oce-card oce-user">
-    <h3>手动创建扫码槽位</h3>
-    <p class="oce-muted">指定一个节点和数量，手动创建扫码槽位。每个槽位会占用当前 LAN 网段中最小的空闲固定 IP。</p>
-    <div class="oce-slot-create">
-      <label class="oce-field">目标节点名称
-        <input id="create_node" class="oce-input" list="node_names" autocomplete="off" placeholder="准确输入已有节点名称">
-      </label>
-      <label class="oce-field">槽位名称前缀
-        <input id="create_prefix" class="oce-input" value="手机槽位" maxlength="120">
-      </label>
-      <label class="oce-field">起始编号
-        <input id="create_start" class="oce-input" type="number" min="0" max="999999" value="1">
-      </label>
-      <label class="oce-field">创建数量
-        <input id="create_count" class="oce-input" type="number" min="1" max="256" value="1">
-      </label>
+  <section class="oce-card oce-system">
+    <h3>手机使用方法</h3>
+    <div class="oce-steps">
+      <div class="oce-step">1. 手机保持自动获取 IP / DNS，连接当前 Wi-Fi</div>
+      <div class="oce-step">2. 系统自动弹出绑定页，输入管理员分配的三位口令</div>
+      <div class="oce-step">3. 绑定成功后自动重连，并获取对应槽位固定 IP</div>
     </div>
-    <datalist id="node_names"></datalist>
-    <div class="oce-actions" style="margin-top:18px">
-      <button id="create_slots" class="btn cbi-button cbi-button-action" type="button">创建扫码槽位</button>
-    </div>
+    <p class="oce-muted" style="margin-top:14px">手机刷机或更换后，直接输入原槽位口令即可替换旧 MAC，不需要先在后台解绑。一个口令只对应一个槽位，后输入的设备会替换先前设备。</p>
   </section>
 
   <section class="oce-card oce-user">
-    <h3>按已添加节点创建一组扫码槽位</h3>
-    <p class="oce-muted">每个勾选节点创建一个槽位。再次点击会为相同节点继续创建下一组，例如“美国1-槽位1”“美国1-槽位2”。</p>
+    <h3>手动创建口令槽位</h3>
+    <p class="oce-muted">槽位会依次获得 001、002、003……口令，并占用当前 LAN 网段中最小的空闲固定 IP。</p>
+    <div class="oce-slot-create">
+      <label class="oce-field">目标节点名称<input id="create_node" class="oce-input" list="node_names" autocomplete="off" placeholder="准确输入已有节点名称"></label>
+      <label class="oce-field">槽位名称前缀<input id="create_prefix" class="oce-input" value="手机槽位" maxlength="120"></label>
+      <label class="oce-field">起始编号<input id="create_start" class="oce-input" type="number" min="0" max="999999" value="1"></label>
+      <label class="oce-field">创建数量<input id="create_count" class="oce-input" type="number" min="1" max="256" value="1"></label>
+    </div>
+    <datalist id="node_names"></datalist>
+    <div class="oce-actions" style="margin-top:18px"><button id="create_slots" class="btn cbi-button cbi-button-action" type="button">创建口令槽位</button></div>
+  </section>
+
+  <section class="oce-card oce-user">
+    <h3>按已添加节点创建一组口令槽位</h3>
+    <p class="oce-muted">每个勾选节点创建一个槽位；再次点击可为相同节点继续创建下一组。</p>
     <div id="slot_node_choices" class="oce-actions"></div>
     <div class="oce-actions" style="margin-top:14px">
       <label class="oce-check-label"><input id="slot_node_select_all" class="oce-check" type="checkbox"> 全选节点</label>
@@ -57,249 +53,62 @@
     </div>
   </section>
 
-  <div class="oce-slot-grid">
-    <section class="oce-card oce-user">
-      <div class="oce-actions" style="justify-content:space-between">
-        <h3>扫码槽位 <span id="slot_count" class="oce-badge"></span></h3>
-        <button id="refresh_slots" class="btn cbi-button" type="button">刷新列表</button>
-      </div>
-      <input id="slot_search" class="oce-input" type="search" placeholder="搜索槽位名称、IP、MAC、设备名或节点" style="max-width:520px;margin:12px 0">
-      <div class="oce-actions" style="margin:0 0 12px">
-        <label class="oce-check-label"><input id="slot_select_all" class="oce-check" type="checkbox"> 全选当前列表</label>
-        <button id="slot_bulk_delete" class="btn cbi-button oce-danger" type="button" disabled>批量删除（0）</button>
-        <span class="oce-muted">搜索后全选只选择当前搜索结果</span>
-      </div>
-      <div class="oce-scroll" style="max-height:680px">
-        <table class="oce-table">
-          <thead><tr><th style="width:56px">选择</th><th>槽位 / 固定 IP</th><th>当前设备</th><th>代理节点（可修改）</th><th>操作</th></tr></thead>
-          <tbody id="slot_body"><tr><td colspan="5" class="oce-empty">正在读取扫码槽位……</td></tr></tbody>
-        </table>
-      </div>
-    </section>
-
-    <section class="oce-card oce-system oce-slot-qr">
-      <div id="qr_placeholder">
-        <h3>永久扫码二维码</h3>
-        <p class="oce-muted">在左侧槽位列表点击“显示二维码”。手机刷机后再次扫描同一个二维码，即可用新 MAC 替换旧 MAC。</p>
-      </div>
-      <div id="slot_qr" style="display:none"></div>
-      <h3 id="qr_title" style="display:none;margin-top:16px"></h3>
-      <p id="qr_detail" style="display:none"></p>
-      <code id="slot_qr_url" class="oce-slot-url" style="display:none"></code>
-      <button id="copy_slot_link" class="btn cbi-button" type="button" style="display:none;margin-top:14px">复制槽位链接</button>
-      <p id="qr_warning" class="oce-muted" style="display:none">此二维码长期有效。拿到二维码并连接本路由器 LAN 的设备可以占用该槽位；如二维码泄露，请点击“重置二维码”。</p>
-    </section>
-  </div>
-
-  <section class="oce-card oce-system">
-    <h3>扫码绑定说明</h3>
-    <p>手机保持自动获取 IP / DNS，连接当前路由器 Wi-Fi 后扫描槽位二维码并确认。首次绑定后槽位会自动锁定，其他手机不能直接替换；刷机或更换手机时，请先在槽位列表点击“允许换绑”，再于10分钟内扫描同一二维码。</p>
-    <div class="cbi-page-actions">
-      <button id="apply_config" class="btn cbi-button cbi-button-apply" type="button">应用配置</button>
+  <section class="oce-card oce-user">
+    <div class="oce-actions" style="justify-content:space-between"><h3>口令槽位 <span id="slot_count" class="oce-badge"></span></h3><button id="refresh_slots" class="btn cbi-button" type="button">刷新列表</button></div>
+    <input id="slot_search" class="oce-input" type="search" placeholder="搜索口令、槽位名称、IP、MAC、设备名或节点" style="margin-bottom:14px">
+    <div class="oce-actions" style="margin-bottom:14px">
+      <label class="oce-check-label"><input id="slot_select_all" class="oce-check" type="checkbox"> 全选当前列表</label>
+      <button id="slot_bulk_delete" class="btn cbi-button oce-danger" type="button" disabled>批量删除（0）</button>
+      <span class="oce-muted">搜索后全选只选择当前搜索结果</span>
+    </div>
+    <div class="oce-scroll" style="max-height:720px">
+      <table class="oce-table">
+        <thead><tr><th style="width:56px">选择</th><th>口令 / 槽位 / 固定 IP</th><th>当前设备</th><th>代理节点（可修改）</th><th>操作</th></tr></thead>
+        <tbody id="slot_body"><tr><td colspan="5" class="oce-empty">正在读取口令槽位……</td></tr></tbody>
+      </table>
     </div>
   </section>
+
+  <section class="oce-card oce-system">
+    <h3>配置生效</h3>
+    <p>新建、修改或删除槽位规则后点击应用配置。日常输入口令换绑只更新 DHCP/MAC，不需要重启 OpenClash。</p>
+    <div class="cbi-page-actions"><button id="apply_config" class="btn cbi-button cbi-button-apply" type="button">应用配置</button></div>
+  </section>
 </div>
-<script src="<%=resource%>/openclash-editor/editor-common.js?v=2.1.1"></script>
+<script src="<%=resource%>/openclash-editor/editor-common.js?v=2.2.0"></script>
 <script>
 (function(){
   var E=OpenClashEditor;
-  var urls={
-    state:'<%=luci.dispatcher.build_url("admin","services","openclash","visual-editor-state")%>',
-    list:'<%=luci.dispatcher.build_url("admin","services","openclash","visual-editor-slots-list")%>',
-    create:'<%=luci.dispatcher.build_url("admin","services","openclash","visual-editor-slots-create")%>',
-    createMany:'<%=luci.dispatcher.build_url("admin","services","openclash","visual-editor-slots-create-many")%>',
-    update:'<%=luci.dispatcher.build_url("admin","services","openclash","visual-editor-slot-update")%>',
-    regenerate:'<%=luci.dispatcher.build_url("admin","services","openclash","visual-editor-slot-regenerate")%>',
-    rebind:'<%=luci.dispatcher.build_url("admin","services","openclash","visual-editor-slot-rebind")%>',
-    refreshLease:'<%=luci.dispatcher.build_url("admin","services","openclash","visual-editor-slot-refresh-lease")%>',
-    remove:'<%=luci.dispatcher.build_url("admin","services","openclash","visual-editor-slot-delete")%>',
-    removeBulk:'<%=luci.dispatcher.build_url("admin","services","openclash","visual-editor-slots-delete")%>',
-    restart:'<%=luci.dispatcher.build_url("admin","services","openclash","visual-editor-restart")%>',
-    bind:'<%=luci.dispatcher.build_url("oeb")%>'
-  };
+  var urls={state:'<%=luci.dispatcher.build_url("admin","services","openclash","visual-editor-state")%>',list:'<%=luci.dispatcher.build_url("admin","services","openclash","visual-editor-slots-list")%>',create:'<%=luci.dispatcher.build_url("admin","services","openclash","visual-editor-slots-create")%>',createMany:'<%=luci.dispatcher.build_url("admin","services","openclash","visual-editor-slots-create-many")%>',update:'<%=luci.dispatcher.build_url("admin","services","openclash","visual-editor-slot-update")%>',remove:'<%=luci.dispatcher.build_url("admin","services","openclash","visual-editor-slot-delete")%>',removeBulk:'<%=luci.dispatcher.build_url("admin","services","openclash","visual-editor-slots-delete")%>',restart:'<%=luci.dispatcher.build_url("admin","services","openclash","visual-editor-restart")%>'};
   var slots=[],knownNodes=[],selectedSlots=Object.create(null);
   function el(id){return document.getElementById(id)}
   function msg(text,type){var x=el('status');x.textContent=text;x.className='oce-status '+(type==='ok'?'oce-ok':type==='warn'?'oce-warn':'oce-error')}
+  function searchable(slot){return [slot.code,slot.name,slot.ip,slot.mac,slot.device_name,slot.node].map(function(v){return String(v||'').toLowerCase()})}
   function slotRow(slot){
     var status=slot.online?'<span class="oce-online">在线</span>':'<span class="oce-offline">离线</span>';
-    var lock=slot.mac?(slot.rebind_allowed?'<div class="oce-unlocked">允许换绑（约 '+Math.max(1,Math.ceil(Number(slot.rebind_remaining||0)/60))+' 分钟）</div>':'<div class="oce-locked">🔒 已锁定</div>'):'';
     var ipMismatch=!!(slot.mac&&slot.current_ip&&slot.current_ip!==slot.ip);
-    var ipWarning=ipMismatch?('<div class="oce-error" style="margin-top:5px">当前仍使用旧 IP '+E.esc(slot.current_ip)+'，请刷新 IP 租约后重连 Wi-Fi</div>'):'';
-    var device=slot.mac?('<strong>'+E.esc(slot.device_name||'已绑定设备')+'</strong><div class="oce-muted">'+E.esc(slot.mac)+'</div><div>'+status+(slot.current_ip?' · 当前 '+E.esc(slot.current_ip):'')+'</div>'+ipWarning+lock):'<span class="oce-muted">等待首次扫码，绑定后自动锁定</span>';
-    var rebindButton=slot.mac?('<button class="btn cbi-button '+(slot.rebind_allowed?'oce-danger':'cbi-button-positive')+' slot-rebind" type="button">'+(slot.rebind_allowed?'取消换绑':'允许换绑')+'</button> '):'';
-    var refreshLeaseButton=slot.mac?('<button class="btn cbi-button '+(ipMismatch?'cbi-button-action':'')+' slot-refresh-lease" type="button">刷新 IP 租约</button> '):'';
-    var warning=slot.rule_ok?'':'<div class="oce-error" style="margin-top:5px">规则缺失或节点不一致</div>';
-    return '<tr data-id="'+E.esc(slot.id)+'">'+
-      '<td><input class="slot-select oce-check" data-id="'+E.esc(slot.id)+'" type="checkbox" '+(selectedSlots[slot.id]?'checked':'')+' aria-label="选择槽位 '+E.esc(slot.name)+'"></td>'+
-      '<td><strong>'+E.esc(slot.name)+'</strong><div class="oce-muted">'+E.esc(slot.ip)+'/32</div>'+warning+'</td>'+
-      '<td>'+device+'</td>'+
-      '<td><input class="oce-input oce-slot-node" list="node_names" value="'+E.esc(slot.node||'')+'" placeholder="已有节点名称"> <button class="btn cbi-button slot-update" type="button">修改</button></td>'+
-      '<td><button class="btn cbi-button cbi-button-action slot-show" type="button">显示二维码</button> '+
-      rebindButton+
-      refreshLeaseButton+
-      '<button class="btn cbi-button slot-regenerate" type="button">重置二维码</button> '+
-      '<button class="btn cbi-button oce-danger slot-delete" type="button">删除</button></td></tr>';
+    var warning=ipMismatch?('<div class="oce-error" style="margin-top:5px">当前仍使用旧 IP '+E.esc(slot.current_ip)+'，重新连接后将获取 '+E.esc(slot.ip)+'</div>'):'';
+    var device=slot.mac?('<strong>'+E.esc(slot.device_name||'已绑定设备')+'</strong><div class="oce-muted">'+E.esc(slot.mac)+'</div><div>'+status+(slot.current_ip?' · 当前 '+E.esc(slot.current_ip):'')+'</div>'+warning):'<span class="oce-muted">等待设备输入口令</span>';
+    var ruleWarning=slot.rule_ok?'':'<div class="oce-error" style="margin-top:5px">规则缺失或节点不一致</div>';
+    return '<tr data-id="'+E.esc(slot.id)+'"><td><input class="slot-select oce-check" data-id="'+E.esc(slot.id)+'" type="checkbox" '+(selectedSlots[slot.id]?'checked':'')+'></td>'+
+      '<td><span class="oce-code">'+E.esc(slot.code||'---')+'</span><div><strong>'+E.esc(slot.name)+'</strong></div><div class="oce-muted">'+E.esc(slot.ip)+'/32</div>'+ruleWarning+'</td>'+
+      '<td>'+device+'</td><td><input class="oce-input oce-slot-node" list="node_names" value="'+E.esc(slot.node||'')+'" placeholder="已有节点名称"> <button class="btn cbi-button slot-update" type="button">修改</button></td>'+
+      '<td><button class="btn cbi-button copy-code" type="button">复制口令</button> <button class="btn cbi-button oce-danger slot-delete" type="button">删除</button></td></tr>';
   }
-  function visibleSlotIds(){
-    var query=(el('slot_search').value||'').trim().toLowerCase();
-    return slots.filter(function(slot){return !query||[slot.name,slot.ip,slot.mac,slot.device_name,slot.node].some(function(value){return String(value||'').toLowerCase().indexOf(query)>=0})}).map(function(slot){return slot.id});
-  }
-  function syncSlotSelection(){
-    var ids=visibleSlotIds(),selectedVisible=ids.filter(function(id){return selectedSlots[id]}).length;
-    var selectedTotal=Object.keys(selectedSlots).filter(function(id){return selectedSlots[id]&&slots.some(function(slot){return slot.id===id})}).length;
-    var control=el('slot_select_all');control.disabled=ids.length===0;control.checked=ids.length>0&&selectedVisible===ids.length;control.indeterminate=selectedVisible>0&&selectedVisible<ids.length;
-    el('slot_bulk_delete').disabled=selectedTotal===0;el('slot_bulk_delete').textContent='批量删除（'+selectedTotal+'）';
-  }
-  function renderSlots(){
-    var query=(el('slot_search').value||'').trim().toLowerCase();
-    var valid=Object.create(null);slots.forEach(function(slot){valid[slot.id]=true});Object.keys(selectedSlots).forEach(function(id){if(!valid[id])delete selectedSlots[id]});
-    var shown=slots.filter(function(slot){
-      return !query||[slot.name,slot.ip,slot.mac,slot.device_name,slot.node].some(function(value){return String(value||'').toLowerCase().indexOf(query)>=0});
-    });
-    el('slot_count').textContent=query?'显示 '+shown.length+' / '+slots.length:slots.length+' 个';
-    el('slot_body').innerHTML=shown.map(slotRow).join('')||'<tr><td colspan="5" class="oce-empty">'+(query?'没有匹配的扫码槽位':'还没有创建扫码槽位')+'</td></tr>';
-    syncSlotSelection();
-  }
-  function loadSlots(){
-    el('refresh_slots').disabled=true;
-    return E.get(urls.list).then(function(result){
-      if(!result.ok)throw new Error(result.error+(result.details?'\n'+result.details:''));
-      slots=result.slots||[];renderSlots();
-      var migration=result.auto_created_count>0?'；已根据现有设备规则自动补齐 '+result.auto_created_count+' 个槽位':'';
-      msg('已读取 '+slots.length+' 个扫码槽位，LAN 网段 '+result.lan_cidr+migration,'ok');
-    }).catch(function(error){msg('读取扫码槽位失败：'+error.message,'error')}).then(function(){el('refresh_slots').disabled=false});
-  }
-  function drawQr(url){
-    return L.require('uqr').then(function(Uqr){
-      var renderer=typeof Uqr==='function'?new Uqr():Uqr;
-      if(!renderer||typeof renderer.renderSVG!=='function')throw new Error('当前 LuCI 二维码组件不兼容');
-      el('slot_qr').innerHTML=renderer.renderSVG(url,{pixelSize:10,border:4,ecc:'M'});
-      var svg=el('slot_qr').querySelector('svg');
-      if(svg){
-        svg.setAttribute('shape-rendering','crispEdges');
-        svg.style.width=svg.getAttribute('width')+'px';
-        svg.style.height=svg.getAttribute('height')+'px';
-        svg.style.maxWidth='100%';
-      }
-    });
-  }
-  function showQr(slot){
-    var url=location.protocol+'//'+location.host+urls.bind+'?s='+encodeURIComponent(slot.token);
-    drawQr(url).then(function(){
-      el('qr_placeholder').style.display='none';el('slot_qr').style.display='';el('qr_title').style.display='';el('qr_detail').style.display='';
-      el('slot_qr_url').style.display='';el('copy_slot_link').style.display='';el('qr_warning').style.display='';
-      el('qr_title').textContent=slot.name;el('qr_detail').textContent=slot.ip+'/32 → '+slot.node;el('slot_qr_url').textContent=url;
-      msg('已显示 '+slot.name+' 的永久二维码','ok');
-    }).catch(function(error){msg('二维码生成失败：'+error.message,'error')});
-  }
-  el('create_slots').onclick=function(){
-    var button=this,node=el('create_node').value.trim(),prefix=el('create_prefix').value.trim();
-    var count=parseInt(el('create_count').value,10),start=parseInt(el('create_start').value,10);
-    if(knownNodes.indexOf(node)<0){msg('节点名称不存在，请准确输入正式配置中的已有节点名称','error');return}
-    if(!Number.isInteger(count)||count<1||count>256){msg('创建数量必须在 1 至 256 之间','error');return}
-    if(!Number.isInteger(start)||start<0){msg('起始编号必须是非负整数','error');return}
-    if(!confirm('确认创建 '+count+' 个扫码槽位？\n将占用 '+count+' 个固定 IP，并写入 '+count+' 条设备规则。'))return;
-    button.disabled=true;
-    E.post(urls.create,{node:node,prefix:prefix,count:String(count),start:String(start)}).then(function(result){
-      if(!result.ok)throw new Error(result.error+(result.details?'\n'+result.details:''));
-      alert('已创建 '+result.created_count+' 个扫码槽位。请点击页面底部“应用配置”使规则生效。');
-      return loadSlots();
-    }).catch(function(error){msg('创建扫码槽位失败：'+error.message,'error')}).then(function(){button.disabled=false});
-  };
-  function selectedNodeNames(){return [].slice.call(document.querySelectorAll('.slot-node-choice:checked')).map(function(item){return item.value})}
-  function syncNodeSelectAll(){var items=[].slice.call(document.querySelectorAll('.slot-node-choice')),selected=items.filter(function(item){return item.checked}).length,control=el('slot_node_select_all');control.disabled=items.length===0;control.checked=items.length>0&&selected===items.length;control.indeterminate=selected>0&&selected<items.length}
-  el('slot_node_select_all').onchange=function(){var checked=this.checked;[].slice.call(document.querySelectorAll('.slot-node-choice')).forEach(function(item){item.checked=checked});syncNodeSelectAll()};
-  el('slot_node_choices').onchange=function(event){if(event.target.classList.contains('slot-node-choice'))syncNodeSelectAll()};
-  el('create_slot_group').onclick=function(){
-    var names=selectedNodeNames();if(!names.length){msg('请至少勾选一个节点','warn');return}
-    if(!confirm('确认为所选 '+names.length+' 个节点各创建一个新的扫码槽位？'))return;
-    var button=this;button.disabled=true;
-    E.post(urls.createMany,{nodes:names.join(',')}).then(function(result){
-      if(!result.ok)throw new Error(result.error+(result.details?'\n'+result.details:''));
-      alert('已为 '+result.created_count+' 个节点创建一组扫码槽位。请点击页面底部“应用配置”。');return loadSlots();
-    }).catch(function(error){msg('批量创建扫码槽位失败：'+error.message,'error')}).then(function(){button.disabled=false});
-  };
-  el('slot_body').onclick=function(event){
-    if(event.target.classList.contains('slot-select')){
-      var selectedId=event.target.getAttribute('data-id');if(event.target.checked)selectedSlots[selectedId]=true;else delete selectedSlots[selectedId];syncSlotSelection();return;
-    }
-    var row=event.target.closest('tr[data-id]');if(!row)return;
-    var id=row.getAttribute('data-id'),slot=slots.find(function(item){return item.id===id});if(!slot)return;
-    if(event.target.classList.contains('slot-show')){showQr(slot);return}
-    if(event.target.classList.contains('slot-rebind')){
-      var allow=!slot.rebind_allowed;
-      var question=allow?('允许其他手机在10分钟内替换“'+slot.name+'”当前绑定的设备？\n成功换绑后会立即重新锁定。'):('立即取消“'+slot.name+'”的换绑授权？');
-      if(!confirm(question))return;
-      event.target.disabled=true;
-      E.post(urls.rebind,{id:id,enabled:allow?'1':'0'}).then(function(result){
-        if(!result.ok)throw new Error(result.error+(result.details?'\n'+result.details:''));
-        alert(allow?'已允许换绑，请让新手机在10分钟内扫描该槽位二维码。':'已取消换绑授权，槽位重新锁定。');return loadSlots();
-      }).catch(function(error){msg('修改换绑授权失败：'+error.message,'error');event.target.disabled=false});
-    }else if(event.target.classList.contains('slot-refresh-lease')){
-      if(!confirm('确认释放“'+slot.name+'”当前设备的旧 DHCP 租约并重启 DHCP 服务？\n其他设备的租约不会被删除；操作后请让这台手机关闭 Wi-Fi 约 5 秒再重新连接。'))return;
-      event.target.disabled=true;
-      E.post(urls.refreshLease,{id:id}).then(function(result){
-        if(!result.ok)throw new Error(result.error+(result.details?'\n'+result.details:''));
-        var detail=result.old_ip&&result.old_ip!==result.ip?('已释放旧 IP '+result.old_ip+'。'):'DHCP 固定租约已重新载入。';
-        alert(detail+'\n请让这台手机关闭 Wi-Fi 约 5 秒后重新连接，随后刷新列表确认当前 IP 为 '+result.ip+'。');return loadSlots();
-      }).catch(function(error){msg('刷新 IP 租约失败：'+error.message,'error');event.target.disabled=false});
-    }else if(event.target.classList.contains('slot-update')){
-      var node=row.querySelector('.oce-slot-node').value.trim();
-      if(knownNodes.indexOf(node)<0){msg('节点名称不存在，请准确输入正式配置中的已有节点名称','error');return}
-      E.post(urls.update,{id:id,node:node}).then(function(result){
-        if(!result.ok)throw new Error(result.error+(result.details?'\n'+result.details:''));
-        alert(result.unchanged?'节点没有变化。':'槽位节点修改成功！请应用配置使新规则生效。');return loadSlots();
-      }).catch(function(error){msg('修改槽位失败：'+error.message,'error')});
-    }else if(event.target.classList.contains('slot-regenerate')){
-      if(!confirm('确认重置 '+slot.name+' 的永久二维码？\n旧二维码会立即失效，槽位 IP、节点和当前设备不变。'))return;
-      E.post(urls.regenerate,{id:id}).then(function(result){
-        if(!result.ok)throw new Error(result.error+(result.details?'\n'+result.details:''));
-        alert('二维码已重置，旧二维码已经失效。');return loadSlots().then(function(){var updated=slots.find(function(item){return item.id===id});if(updated)showQr(updated)});
-      }).catch(function(error){msg('重置二维码失败：'+error.message,'error')});
-    }else if(event.target.classList.contains('slot-delete')){
-      if(!confirm('确认删除扫码槽位 '+slot.name+'？\n将删除槽位规则、DHCP 固定租约和永久二维码，但不会删除代理节点。'))return;
-      E.post(urls.remove,{id:id}).then(function(result){
-        if(!result.ok)throw new Error(result.error+(result.details?'\n'+result.details:''));
-        alert('扫码槽位已删除。请应用配置使删除立即生效。');return loadSlots();
-      }).catch(function(error){msg('删除槽位失败：'+error.message,'error')});
-    }
-  };
-  el('slot_search').oninput=renderSlots;
-  el('slot_select_all').onchange=function(){var checked=this.checked;visibleSlotIds().forEach(function(id){if(checked)selectedSlots[id]=true;else delete selectedSlots[id]});renderSlots()};
-  el('slot_bulk_delete').onclick=function(){
-    var ids=Object.keys(selectedSlots).filter(function(id){return selectedSlots[id]&&slots.some(function(slot){return slot.id===id})});if(!ids.length)return;
-    if(!confirm('确认批量删除选中的 '+ids.length+' 个扫码槽位？\n将同时删除对应规则、DHCP 固定租约和二维码，不会删除代理节点。'))return;
-    var button=this;button.disabled=true;
-    E.post(urls.removeBulk,{ids:ids.join(',')}).then(function(result){
-      if(!result.ok)throw new Error(result.error+(result.details?'\n'+result.details:''));
-      selectedSlots=Object.create(null);alert('已批量删除 '+result.deleted_count+' 个扫码槽位。请点击“应用配置”使删除立即生效。');return loadSlots();
-    }).catch(function(error){msg('批量删除扫码槽位失败：'+error.message,'error');button.disabled=false});
-  };
-  el('refresh_slots').onclick=loadSlots;
-  el('copy_slot_link').onclick=function(){
-    var text=el('slot_qr_url').textContent;
-    function done(){msg('扫码槽位链接已复制','ok')}
-    if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(text).then(done).catch(function(){fallback(text)})}else fallback(text);
-    function fallback(value){var area=document.createElement('textarea');area.value=value;area.style.position='fixed';area.style.opacity='0';document.body.appendChild(area);area.select();document.execCommand('copy');document.body.removeChild(area);done()}
-  };
-  el('apply_config').onclick=function(){
-    if(!confirm('确认应用当前正式配置并重启 OpenClash？\n网络可能会短暂中断。'))return;
-    var button=this;button.disabled=true;
-    E.post(urls.restart,{}).then(function(result){
-      if(!result.ok)throw new Error(result.error+(result.details?'\n'+result.details:''));
-      alert('配置已应用！OpenClash 正在后台重启。');msg('配置已应用，OpenClash 正在后台重启','ok');
-    }).catch(function(error){msg('应用配置失败：'+error.message,'error');button.disabled=false});
-  };
-  E.get(urls.state).then(function(state){
-    if(!state.ok)throw new Error(state.error||'读取节点失败');
-    el('version').textContent='版本 '+state.version;
-    knownNodes=(state.nodes||[]).map(function(node){return node.name});
-    el('node_names').innerHTML=knownNodes.map(function(name){return '<option value="'+E.esc(name)+'"></option>'}).join('');
-    el('slot_node_choices').innerHTML=knownNodes.map(function(name){return '<label><input class="slot-node-choice oce-check" type="checkbox" value="'+E.esc(name)+'"> '+E.esc(name)+'</label>'}).join('')||'<span class="oce-muted">尚无节点，请先到节点管理页面添加。</span>';
-    syncNodeSelectAll();
-    if(knownNodes.length===1)el('create_node').value=knownNodes[0];
-    return loadSlots();
-  }).catch(function(error){msg(error.message,'error')});
+  function visibleSlotIds(){var q=(el('slot_search').value||'').trim().toLowerCase();return slots.filter(function(s){return !q||searchable(s).some(function(v){return v.indexOf(q)>=0})}).map(function(s){return s.id})}
+  function syncSelection(){var ids=visibleSlotIds(),n=ids.filter(function(id){return selectedSlots[id]}).length,total=Object.keys(selectedSlots).filter(function(id){return selectedSlots[id]&&slots.some(function(s){return s.id===id})}).length,c=el('slot_select_all');c.disabled=!ids.length;c.checked=ids.length>0&&n===ids.length;c.indeterminate=n>0&&n<ids.length;el('slot_bulk_delete').disabled=!total;el('slot_bulk_delete').textContent='批量删除（'+total+'）'}
+  function renderSlots(){var q=(el('slot_search').value||'').trim().toLowerCase(),valid={};slots.forEach(function(s){valid[s.id]=1});Object.keys(selectedSlots).forEach(function(id){if(!valid[id])delete selectedSlots[id]});var shown=slots.filter(function(s){return !q||searchable(s).some(function(v){return v.indexOf(q)>=0})});el('slot_count').textContent=q?'显示 '+shown.length+' / '+slots.length:slots.length+' 个';el('slot_body').innerHTML=shown.map(slotRow).join('')||'<tr><td colspan="5" class="oce-empty">'+(q?'没有匹配的口令槽位':'还没有创建口令槽位')+'</td></tr>';syncSelection()}
+  function loadSlots(){el('refresh_slots').disabled=true;return E.get(urls.list).then(function(r){if(!r.ok)throw new Error(r.error+(r.details?'\n'+r.details:''));slots=r.slots||[];renderSlots();var migration=r.auto_created_count>0?'；已根据设备规则补齐 '+r.auto_created_count+' 个槽位':'';msg('已读取 '+slots.length+' 个口令槽位，LAN 网段 '+r.lan_cidr+migration,'ok')}).catch(function(e){msg('读取口令槽位失败：'+e.message,'error')}).then(function(){el('refresh_slots').disabled=false})}
+  el('create_slots').onclick=function(){var b=this,node=el('create_node').value.trim(),prefix=el('create_prefix').value.trim(),count=parseInt(el('create_count').value,10),start=parseInt(el('create_start').value,10);if(knownNodes.indexOf(node)<0){msg('节点名称不存在','error');return}if(!Number.isInteger(count)||count<1||count>256){msg('创建数量必须在 1 至 256 之间','error');return}if(!Number.isInteger(start)||start<0){msg('起始编号必须是非负整数','error');return}if(!confirm('确认创建 '+count+' 个口令槽位？'))return;b.disabled=true;E.post(urls.create,{node:node,prefix:prefix,count:String(count),start:String(start)}).then(function(r){if(!r.ok)throw new Error(r.error);alert('已创建 '+r.created_count+' 个口令槽位。请应用配置。');return loadSlots()}).catch(function(e){msg('创建失败：'+e.message,'error')}).then(function(){b.disabled=false})};
+  function selectedNodes(){return [].slice.call(document.querySelectorAll('.slot-node-choice:checked')).map(function(x){return x.value})}
+  function syncNodeAll(){var a=[].slice.call(document.querySelectorAll('.slot-node-choice')),n=a.filter(function(x){return x.checked}).length,c=el('slot_node_select_all');c.disabled=!a.length;c.checked=a.length>0&&n===a.length;c.indeterminate=n>0&&n<a.length}
+  el('slot_node_select_all').onchange=function(){var on=this.checked;[].slice.call(document.querySelectorAll('.slot-node-choice')).forEach(function(x){x.checked=on});syncNodeAll()};el('slot_node_choices').onchange=syncNodeAll;
+  el('create_slot_group').onclick=function(){var names=selectedNodes();if(!names.length){msg('请至少勾选一个节点','warn');return}if(!confirm('确认为所选 '+names.length+' 个节点各创建一个口令槽位？'))return;var b=this;b.disabled=true;E.post(urls.createMany,{nodes:names.join(',')}).then(function(r){if(!r.ok)throw new Error(r.error);alert('已创建 '+r.created_count+' 个口令槽位。请应用配置。');return loadSlots()}).catch(function(e){msg('批量创建失败：'+e.message,'error')}).then(function(){b.disabled=false})};
+  el('slot_body').onclick=function(event){if(event.target.classList.contains('slot-select')){var sid=event.target.getAttribute('data-id');if(event.target.checked)selectedSlots[sid]=1;else delete selectedSlots[sid];syncSelection();return}var row=event.target.closest('tr[data-id]');if(!row)return;var id=row.getAttribute('data-id'),slot=slots.find(function(s){return s.id===id});if(!slot)return;if(event.target.classList.contains('copy-code')){var value=slot.code||'';if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(value);alert('槽位口令：'+value);return}if(event.target.classList.contains('slot-update')){var node=row.querySelector('.oce-slot-node').value.trim();if(knownNodes.indexOf(node)<0){msg('节点名称不存在','error');return}E.post(urls.update,{id:id,node:node}).then(function(r){if(!r.ok)throw new Error(r.error);alert(r.unchanged?'节点没有变化。':'槽位节点修改成功，请应用配置。');return loadSlots()}).catch(function(e){msg('修改失败：'+e.message,'error')});return}if(event.target.classList.contains('slot-delete')){if(!confirm('确认删除口令槽位 '+slot.code+'（'+slot.name+'）？\n将删除对应规则和 DHCP 固定租约，不会删除代理节点。'))return;E.post(urls.remove,{id:id}).then(function(r){if(!r.ok)throw new Error(r.error);alert('口令槽位已删除，请应用配置。');return loadSlots()}).catch(function(e){msg('删除失败：'+e.message,'error')})}};
+  el('slot_search').oninput=renderSlots;el('slot_select_all').onchange=function(){var on=this.checked;visibleSlotIds().forEach(function(id){if(on)selectedSlots[id]=1;else delete selectedSlots[id]});renderSlots()};
+  el('slot_bulk_delete').onclick=function(){var ids=Object.keys(selectedSlots).filter(function(id){return selectedSlots[id]&&slots.some(function(s){return s.id===id})});if(!ids.length||!confirm('确认批量删除 '+ids.length+' 个口令槽位？'))return;var b=this;b.disabled=true;E.post(urls.removeBulk,{ids:ids.join(',')}).then(function(r){if(!r.ok)throw new Error(r.error);selectedSlots={};alert('已删除 '+r.deleted_count+' 个口令槽位，请应用配置。');return loadSlots()}).catch(function(e){msg('批量删除失败：'+e.message,'error');b.disabled=false})};el('refresh_slots').onclick=loadSlots;
+  el('apply_config').onclick=function(){if(!confirm('确认应用当前正式配置并重启 OpenClash？'))return;var b=this;b.disabled=true;E.post(urls.restart,{}).then(function(r){if(!r.ok)throw new Error(r.error);alert('配置已应用！OpenClash 正在后台重启。');msg('配置已应用，OpenClash 正在后台重启','ok')}).catch(function(e){msg('应用失败：'+e.message,'error');b.disabled=false})};
+  E.get(urls.state).then(function(s){if(!s.ok)throw new Error(s.error||'读取节点失败');el('version').textContent='版本 '+s.version;knownNodes=(s.nodes||[]).map(function(n){return n.name});el('node_names').innerHTML=knownNodes.map(function(n){return '<option value="'+E.esc(n)+'"></option>'}).join('');el('slot_node_choices').innerHTML=knownNodes.map(function(n){return '<label><input class="slot-node-choice oce-check" type="checkbox" value="'+E.esc(n)+'"> '+E.esc(n)+'</label>'}).join('')||'<span class="oce-muted">尚无节点，请先添加节点。</span>';syncNodeAll();if(knownNodes.length===1)el('create_node').value=knownNodes[0];return loadSlots()}).catch(function(e){msg(e.message,'error')});
 })();
 </script>
 <%+footer%>

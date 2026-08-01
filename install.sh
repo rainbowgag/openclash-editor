@@ -34,11 +34,6 @@ if [ ! -d /usr/lib/lua/luci/controller ] || [ ! -d /usr/lib/lua/luci/view ]; the
   exit 1
 fi
 
-if [ ! -f /www/luci-static/resources/uqr.js ]; then
-  echo "错误：当前 LuCI 缺少本地二维码组件，请先执行：opkg update && opkg install libluci-uqr" >&2
-  exit 1
-fi
-
 fetch_file() {
   url="$1"
   destination="$2"
@@ -77,6 +72,9 @@ fetch_file "$BASE_URL/luci/view/openclash_editor/slots.htm" "/usr/lib/lua/luci/v
 fetch_file "$BASE_URL/www/converter.js" "/www/luci-static/resources/openclash-editor/converter.js"
 fetch_file "$BASE_URL/www/editor-common.js" "/www/luci-static/resources/openclash-editor/editor-common.js"
 fetch_file "$BASE_URL/www/editor.css" "/www/luci-static/resources/openclash-editor/editor.css"
+fetch_file "$BASE_URL/portal-watch.sh" "/usr/share/openclash-editor/portal-watch.sh"
+fetch_file "$BASE_URL/openclash-editor-portal.init" "/etc/init.d/openclash-editor-portal"
+fetch_file "$BASE_URL/openclash-editor-portal.hotplug" "/etc/hotplug.d/iface/99-openclash-editor-portal"
 printf '%s\n' "$BASE_URL" > /usr/share/openclash-editor/SOURCE_URL
 printf '%s\n' "scan" > /usr/share/openclash-editor/EDITION
 if [ -n "$RESOLVE_IP" ]; then
@@ -87,6 +85,9 @@ fi
 
 chmod 755 /usr/share/openclash-editor/backend.rb
 chmod 755 /usr/share/openclash-editor/update.sh
+chmod 755 /usr/share/openclash-editor/portal-watch.sh
+chmod 755 /etc/init.d/openclash-editor-portal
+chmod 755 /etc/hotplug.d/iface/99-openclash-editor-portal
 chmod 644 /usr/share/openclash-editor/VERSION
 chmod 644 /usr/share/openclash-editor/SOURCE_URL
 chmod 644 /usr/share/openclash-editor/EDITION
@@ -105,9 +106,13 @@ rm -f /usr/lib/lua/luci/view/openclash_editor/qr.htm
 ruby -c /usr/share/openclash-editor/backend.rb >/dev/null
 lua /usr/lib/lua/luci/controller/openclash_editor.lua >/dev/null
 
+/etc/init.d/openclash-editor-portal enable
+/etc/init.d/openclash-editor-portal restart
+
 rm -f /tmp/luci-indexcache 2>/dev/null || true
 rm -f /tmp/luci-modulecache/* 2>/dev/null || true
 
 echo "安装成功！"
+echo "未绑定设备连接网络后会自动弹出口令绑定页；槽位口令从 001 开始。"
 echo "请刷新 LuCI，然后进入：服务 -> OpenClash -> Visual Editor"
 echo "页面地址：http://路由器IP/cgi-bin/luci/admin/services/openclash/visual-editor"

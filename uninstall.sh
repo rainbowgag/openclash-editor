@@ -7,12 +7,20 @@ if [ "$(id -u)" != "0" ]; then
   exit 1
 fi
 
+if [ -x /etc/init.d/openclash-editor-portal ]; then
+  /etc/init.d/openclash-editor-portal disable >/dev/null 2>&1 || true
+  /etc/init.d/openclash-editor-portal stop >/dev/null 2>&1 || true
+fi
+
 rm -f /usr/share/openclash-editor/backend.rb
 rm -f /usr/share/openclash-editor/VERSION
 rm -f /usr/share/openclash-editor/SOURCE_URL
 rm -f /usr/share/openclash-editor/EDITION
 rm -f /usr/share/openclash-editor/RESOLVE_IP
 rm -f /usr/share/openclash-editor/update.sh
+rm -f /usr/share/openclash-editor/portal-watch.sh
+rm -f /etc/init.d/openclash-editor-portal
+rm -f /etc/hotplug.d/iface/99-openclash-editor-portal
 rm -f /usr/lib/lua/luci/controller/openclash_editor.lua
 rm -f /usr/lib/lua/luci/view/openclash_editor/index.htm
 rm -f /usr/lib/lua/luci/view/openclash_editor/nodes.htm

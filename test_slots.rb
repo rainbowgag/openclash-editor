@@ -34,7 +34,17 @@ abort "slot create count mismatch" unless created["created_count"] == 2
 slots = read_slots
 abort "slot state count mismatch" unless slots.length == 2
 abort "slot token invalid" unless slots.all? { |slot| slot["token"].match?(/\A[0-9a-f]{32}\z/) }
+abort "slot codes were not assigned sequentially" unless slots.map { |slot| slot["code"] } == %w[001 002]
+abort "slot code lookup failed" unless slot_by_code!(slots, "1")["id"] == slots.first["id"]
 abort "slot IP duplicate" unless slots.map { |slot| slot["ip"] }.uniq.length == 2
+
+legacy_slots = slots.map { |slot| slot.reject { |key, _value| key == "code" } }
+File.write(slot_state_path, json_generate({ "slots" => legacy_slots }))
+migrated_codes = read_slots.map { |slot| slot["code"] }
+abort "legacy slots did not receive stable codes" unless migrated_codes == %w[001 002]
+persisted_codes = YAML.safe_load(File.read(slot_state_path), aliases: true).fetch("slots").map { |slot| slot["code"] }
+abort "migrated slot codes were not persisted" unless persisted_codes == %w[001 002]
+slots = read_slots
 
 config = YAML.load_file(config_path, aliases: true)
 slots.each do |slot|
@@ -84,6 +94,7 @@ abort "group slot create count mismatch" unless group["created_count"] == 2
 slots = read_slots
 abort "group slot state count mismatch" unless slots.length == 4
 abort "group slot naming failed" unless group["created"].map { |slot| slot["name"] }.sort == ["second-node-槽位1", "test-node-槽位1"].sort
+abort "group slot codes were not continued" unless group["created"].map { |slot| slot["code"] } == %w[003 004]
 
 plan_request = "/tmp/openclash-editor-slot-plan-unit.json"
 current_rules = device_rules(load_config)

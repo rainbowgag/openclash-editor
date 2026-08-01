@@ -22,7 +22,7 @@ fi
 
 if [ -z "$EDITION" ]; then
   echo "请选择要安装的 OpenClash Visual Editor 版本："
-  echo "  1. 扫码绑定版（永久槽位二维码，刷机后重新扫码换绑）"
+  echo "  1. 口令绑定版（新设备自动弹窗，输入 001 起的口令换绑）"
   echo "  2. 手动绑定 IP 版（保留自动规则和手动 IP 管理）"
   printf "请输入 1 或 2："
   if ! read -r EDITION; then
@@ -35,7 +35,7 @@ fi
 case "$EDITION" in
   1|qr|scan)
     EDITION="scan"
-    LABEL="扫码绑定版"
+    LABEL="口令绑定版"
     CHANNEL="scan"
     ;;
   2|manual|ip)

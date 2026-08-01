@@ -117,7 +117,9 @@ end
 
 def read_slots
   data = YAML.safe_load(File.read(SLOT_STATE), aliases: true) || {}
-  Array(data["slots"]).select { |slot| slot.is_a?(Hash) }
+  slots = Array(data["slots"]).select { |slot| slot.is_a?(Hash) }
+  write_slots(slots) if normalize_slot_codes!(slots)
+  slots
 rescue Errno::ENOENT, Psych::SyntaxError
   []
 end
@@ -142,6 +144,54 @@ end
 
 def random_hex(bytes)
   File.binread("/dev/urandom", bytes).unpack1("H*")
+end
+
+def slot_code!(value)
+  raw = value.to_s.strip
+  raise "请输入槽位口令" unless raw.match?(/\A\d{1,6}\z/)
+  number = raw.to_i
+  raise "槽位口令无效" unless number.positive?
+  format("%03d", number)
+end
+
+def normalize_slot_codes!(slots)
+  used = {}
+  missing = []
+  changed = false
+  Array(slots).each_with_index do |slot, index|
+    begin
+      code = slot_code!(slot["code"])
+      raise "duplicate" if used[code]
+      changed ||= slot["code"].to_s != code
+      slot["code"] = code
+      used[code] = true
+    rescue StandardError
+      missing << [slot, index]
+    end
+  end
+
+  next_number = 1
+  missing.sort_by do |slot, index|
+    begin
+      [ipv4_to_i(slot["ip"]), index]
+    rescue StandardError
+      [0xffffffff, index]
+    end
+  end.each do |slot, _index|
+    next_number += 1 while used[format("%03d", next_number)]
+    code = format("%03d", next_number)
+    slot["code"] = code
+    used[code] = true
+    changed = true
+    next_number += 1
+  end
+  changed
+end
+
+def next_slot_code(slots)
+  normalize_slot_codes!(slots)
+  highest = Array(slots).map { |slot| slot["code"].to_s.to_i }.max.to_i
+  format("%03d", highest + 1)
 end
 
 def ipv4_to_i(address)
@@ -701,6 +751,11 @@ def slot_by_token!(slots, token)
   slots.find { |slot| slot["token"].to_s == token } || raise("固定槽位二维码不存在或已经失效")
 end
 
+def slot_by_code!(slots, code)
+  code = slot_code!(code)
+  slots.find { |slot| slot["code"].to_s == code } || raise("没有找到口令 #{code} 对应的槽位")
+end
+
 def slot_rebind_status(slot, requester_mac = "", now = Time.now.to_i)
   bound_mac = slot["mac"].to_s.downcase
   requester_mac = requester_mac.to_s.downcase
@@ -819,6 +874,7 @@ def build_slots_for_nodes(node_names, slots, additional_ips = [], available_name
     slot = {
       "id" => random_hex(6),
       "token" => random_hex(16),
+      "code" => next_slot_code(working),
       "name" => next_slot_name(node_name, working),
       "ip" => ips[index],
       "node" => node_name,
@@ -863,6 +919,7 @@ def augment_slots_from_rules(slots, rules, node_names)
     slot = {
       "id" => random_hex(6),
       "token" => random_hex(16),
+      "code" => next_slot_code(working),
       "name" => next_slot_name(parts["name"], working),
       "ip" => parts["ip"],
       "node" => parts["name"],
@@ -890,8 +947,9 @@ def slots_response
   auto_updated = 0
   current_slots = with_slot_lock do
     existing = read_slots
+    codes_changed = normalize_slot_codes!(existing)
     reconciled, created, updated = augment_slots_from_rules(existing, device_rules(config), node_names)
-    write_slots(reconciled) if created.any? || updated.positive?
+    write_slots(reconciled) if codes_changed || created.any? || updated.positive?
     auto_created = created
     auto_updated = updated
     reconciled
@@ -953,10 +1011,13 @@ def slots_create_response(node_name, count_value, prefix_value, start_value)
     raise "固定槽位名称已经存在：#{duplicate}" if duplicate
     ips = slot_allocatable_ips(count)
     now = Time.now.to_i
-    created = names.each_with_index.map do |name, index|
-      {
+    working = slots.map(&:dup)
+    created = []
+    names.each_with_index do |name, index|
+      slot = {
         "id" => random_hex(6),
         "token" => random_hex(16),
+        "code" => next_slot_code(working),
         "name" => name,
         "ip" => ips[index],
         "node" => node_name,
@@ -967,6 +1028,8 @@ def slots_create_response(node_name, count_value, prefix_value, start_value)
         "last_bound_at" => 0,
         "rebind_until" => 0
       }
+      working << slot
+      created << slot
     end
     backup = apply_qr_rule_changes(created.to_h { |slot| [slot["ip"], slot["node"]] })
     begin
@@ -1243,17 +1306,30 @@ def safe_dhcp_name(hostname, mac)
   name
 end
 
-def slot_bind_response(token, remote_address)
+def schedule_wifi_reconnect(*macs)
+  valid = macs.flatten.map { |mac| mac.to_s.downcase }.select do |mac|
+    mac.match?(/\A[0-9a-f]{2}(?::[0-9a-f]{2}){5}\z/)
+  end.uniq
+  return false if valid.empty?
+
+  calls = valid.map do |mac|
+    payload = json_generate({ "addr" => mac, "reason" => 5, "deauth" => true, "ban_time" => 0 })
+    "for obj in $(ubus list 'hostapd.*' 2>/dev/null); do ubus call \"$obj\" del_client '#{payload}' >/dev/null 2>&1 || true; done"
+  end.join("; ")
+  system("sh", "-c", "(sleep 2; #{calls}) >/tmp/openclash-editor-portal-reconnect.log 2>&1 &")
+end
+
+def slot_bind_response(identifier, remote_address, force_rebind = false)
   with_slot_lock do
     source_ip = lan_ip!(remote_address)
     device = lookup_lan_device(source_ip)
     mac = device["mac"].to_s.downcase
     slots = read_slots
-    slot = slot_by_token!(slots, token)
+    slot = force_rebind ? slot_by_code!(slots, identifier) : slot_by_token!(slots, identifier)
     target_ip = lan_ip!(slot["ip"])
     raise "槽位引用的节点已经不存在：#{slot['node']}" unless config_node_names.include?(slot["node"].to_s)
     rebind = slot_rebind_status(slot, mac)
-    unless rebind["can_bind"]
+    unless force_rebind || rebind["can_bind"]
       raise "该扫码槽位已绑定其他设备并处于锁定状态，请联系管理员在扫码绑定页面点击“允许换绑”"
     end
 
@@ -1317,7 +1393,7 @@ def slot_bind_response(token, remote_address)
         mac,
         target_ip,
         replaceable_macs,
-        replacing_device && rebind["rebind_allowed"]
+        force_rebind || (replacing_device && rebind["rebind_allowed"])
       )
 
       slots.each do |item|
@@ -1335,6 +1411,7 @@ def slot_bind_response(token, remote_address)
       slot["last_bound_at"] = Time.now.to_i
       slot["rebind_until"] = 0
       write_slots(slots)
+      schedule_wifi_reconnect(slot["mac"], replacing_device ? replaceable_macs : [])
     rescue StandardError
       File.binwrite(SOURCE, File.binread(backup)) if backup
       raise
@@ -1358,6 +1435,10 @@ def slot_bind_response(token, remote_address)
       "reconnect_required" => source_ip != target_ip
     }
   end
+end
+
+def slot_code_bind_response(code, remote_address)
+  slot_bind_response(slot_code!(code), remote_address, true)
 end
 
 def qr_bind_response(token, remote_address)
@@ -1598,6 +1679,7 @@ def normalize_preview_slots(requested_slots, node_names, rules)
   now = Time.now.to_i
   seen_ids = {}
   seen_tokens = {}
+  seen_codes = {}
   seen_names = {}
   seen_ips = {}
   requested_slots.map do |raw|
@@ -1605,6 +1687,7 @@ def normalize_preview_slots(requested_slots, node_names, rules)
     id = slot_id!(raw["id"])
     existing = current_by_id[id]
     token = existing ? existing["token"].to_s : slot_token!(raw["token"])
+    code = slot_code!(existing ? existing["code"] : raw["code"])
     name = raw["name"].to_s.strip
     node_name = raw["node"].to_s.strip
     address = existing ? existing["ip"].to_s : raw["ip"].to_s
@@ -1618,12 +1701,14 @@ def normalize_preview_slots(requested_slots, node_names, rules)
     raise "扫码槽位缺少对应设备规则：#{address}/32 → #{node_name}" unless rules_by_ip[address].to_s == node_name
     raise "扫码槽位编号重复：#{id}" if seen_ids[id]
     raise "扫码槽位二维码重复" if seen_tokens[token]
+    raise "槽位口令重复：#{code}" if seen_codes[code]
     raise "扫码槽位名称重复：#{name}" if seen_names[name]
     raise "扫码槽位 IP 重复：#{address}" if seen_ips[address]
-    seen_ids[id] = seen_tokens[token] = seen_names[name] = seen_ips[address] = true
+    seen_ids[id] = seen_tokens[token] = seen_codes[code] = seen_names[name] = seen_ips[address] = true
     {
       "id" => id,
       "token" => token,
+      "code" => code,
       "name" => name,
       "ip" => address,
       "node" => node_name,
@@ -1741,6 +1826,7 @@ if __FILE__ == $PROGRAM_NAME
              when "slots-apply-pending" then slots_apply_pending_response
              when "slot-info" then slot_info_response(ARGV.fetch(1), ARGV[2].to_s)
              when "slot-bind" then slot_bind_response(ARGV.fetch(1), ARGV.fetch(2))
+             when "slot-code-bind" then slot_code_bind_response(ARGV.fetch(1), ARGV.fetch(2))
              when "slot-update" then slot_update_response(ARGV.fetch(1), ARGV.fetch(2))
              when "slot-regenerate" then slot_regenerate_response(ARGV.fetch(1))
              when "slot-rebind" then slot_rebind_response(ARGV.fetch(1), ARGV.fetch(2))

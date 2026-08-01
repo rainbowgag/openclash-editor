@@ -58,7 +58,7 @@ function index()
 	rules_page.leaf = true
 	rules_page.acl_depends = { "luci-app-openclash" }
 	local qr_page = entry({"admin", "services", "openclash", "visual-editor-qr"},
-		template("openclash_editor/slots"), _("扫码绑定"), 87)
+		template("openclash_editor/slots"), _("口令绑定"), 87)
 	qr_page.leaf = true
 	qr_page.acl_depends = { "luci-app-openclash" }
 	entry({"admin", "services", "openclash", "visual-editor-slots"},
@@ -82,6 +82,8 @@ function index()
 	entry({"admin", "services", "openclash", "visual-editor-slots-delete"}, call("action_slots_delete")).leaf = true
 	entry({"openclash-editor-bind"}, call("action_qr_bind")).leaf = true
 	entry({"oeb"}, call("action_qr_bind")).leaf = true
+	entry({"openclash-editor-code"}, call("action_code_bind")).leaf = true
+	entry({"oec"}, call("action_code_bind")).leaf = true
 end
 
 local function reply(ok, data)
@@ -376,7 +378,7 @@ local function qr_bind_page(title, body, tone)
 	http.write("<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">")
 	http.write("<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">")
 	http.write("<title>" .. pcdata(title) .. "</title>")
-	http.write("<style>body{margin:0;background:#f4f7fb;color:#15254b;font:16px/1.65 sans-serif}.box{max-width:560px;margin:9vh auto;padding:28px;background:#fff;border-radius:18px;box-shadow:0 12px 40px #15254b22}.state{border-left:6px solid " .. color .. ";padding-left:18px}h1{font-size:26px;margin:0 0 16px}.btn{display:block;width:100%;box-sizing:border-box;margin-top:24px;padding:15px;border:0;border-radius:10px;background:#2867e8;color:#fff;font-weight:700;font-size:17px}code{word-break:break-all}</style>")
+	http.write("<style>body{margin:0;background:#f4f7fb;color:#15254b;font:16px/1.65 sans-serif}.box{max-width:560px;margin:9vh auto;padding:28px;background:#fff;border-radius:18px;box-shadow:0 12px 40px #15254b22}.state{border-left:6px solid " .. color .. ";padding-left:18px}h1{font-size:26px;margin:0 0 16px}.input{display:block;width:100%;box-sizing:border-box;margin-top:16px;padding:15px;border:2px solid #9bbcff;border-radius:10px;background:#fff;color:#15254b;font-size:28px;font-weight:800;text-align:center;letter-spacing:.28em}.btn{display:block;width:100%;box-sizing:border-box;margin-top:18px;padding:15px;border:0;border-radius:10px;background:#2867e8;color:#fff;font-weight:700;font-size:17px}code{word-break:break-all}.hint{color:#65748d;font-size:14px}</style>")
 	http.write("</head><body><main class=\"box\"><div class=\"state\"><h1>" .. pcdata(title) .. "</h1>" .. body .. "</div></main></body></html>")
 end
 
@@ -451,6 +453,47 @@ end
 function action_qr_bind()
 	local ok, err = xpcall(qr_bind_impl, debug.traceback)
 	if not ok then qr_bind_page("绑定失败", "<p>" .. pcdata(err) .. "</p>", "error") end
+end
+
+local function code_bind_form(error_message)
+	local warning = error_message and error_message ~= "" and
+		("<p style=\"color:#b42318;font-weight:700\">" .. pcdata(error_message) .. "</p>") or
+		"<p>请输入管理员分配的槽位口令，例如 <strong>001</strong>。</p>"
+	local body = warning ..
+		"<form method=\"post\" action=\"\">" ..
+		"<input class=\"input\" name=\"code\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]*\" maxlength=\"6\" autocomplete=\"one-time-code\" autofocus placeholder=\"001\">" ..
+		"<button class=\"btn\" type=\"submit\">绑定并连接网络</button></form>" ..
+		"<p class=\"hint\">绑定会让当前手机替换该槽位原来的设备，并自动获取槽位固定 IP。请勿把口令交给其他设备使用。</p>"
+	qr_bind_page("设备口令绑定", body, error_message and "error" or "warn")
+end
+
+local function code_bind_impl()
+	if http.getenv("REQUEST_METHOD") ~= "POST" then
+		return code_bind_form(nil)
+	end
+	local code = http.formvalue("code") or ""
+	if type(code) == "table" then code = code[1] or "" end
+	code = tostring(code):gsub("^%s+", ""):gsub("%s+$", "")
+	if not code:match("^%d+$") or #code > 6 then
+		return code_bind_form("口令格式不正确，请输入纯数字口令。")
+	end
+	local remote_address = http.getenv("REMOTE_ADDR") or ""
+	local result, err, details = run_backend("slot-code-bind " .. shellquote(code) .. " " .. shellquote(remote_address))
+	if not result or not result.ok then
+		local message = result and result.error or (details and details ~= "" and details) or err or "绑定失败"
+		return code_bind_form(message)
+	end
+	local slot = result.slot or {}
+	local body = "<p>当前设备已经绑定到槽位 <strong>" .. pcdata(slot.code or code) .. "</strong>。</p>" ..
+		"<p>代理节点：<strong>" .. pcdata(slot.node or "") .. "</strong></p>" ..
+		"<p>固定 IP：<strong>" .. pcdata(result.ip or slot.ip or "") .. "</strong></p>" ..
+		"<p><strong>路由器会让手机自动重新连接 Wi-Fi。</strong>如果没有自动重连，请手动关闭 Wi-Fi 约 5 秒后再打开。</p>"
+	qr_bind_page("绑定成功", body, "ok")
+end
+
+function action_code_bind()
+	local ok, err = xpcall(code_bind_impl, debug.traceback)
+	if not ok then code_bind_form(err) end
 end
 
 local function preview_impl()
