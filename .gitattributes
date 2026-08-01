@@ -3,5 +3,6 @@
 *.lua text eol=lf
 *.htm text eol=lf
 *.js text eol=lf
+*.conf text eol=lf
 VERSION text eol=lf
 README.md text eol=lf
