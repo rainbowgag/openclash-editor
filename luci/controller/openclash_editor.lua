@@ -633,7 +633,22 @@ function action_update_check()
 	local current = (fs.readfile(version_path) or "dev"):gsub("%s+$", "")
 	local latest = sys.exec("sh " .. shellquote(update_path) .. " check 2>/dev/null"):gsub("%s+$", "")
 	if latest == "" then return reply(false, { error = "无法连接 GitHub 检查版本", current = current }) end
-	reply(true, { current = current, latest = latest, available = version_is_newer(latest, current) })
+	local required = {
+		"/usr/share/openclash-editor/portal-watch.sh",
+		"/etc/init.d/openclash-editor-portal",
+		"/etc/hotplug.d/iface/99-openclash-editor-portal"
+	}
+	local missing = {}
+	for _, path in ipairs(required) do
+		if not fs.access(path) then missing[#missing + 1] = path end
+	end
+	reply(true, {
+		current = current,
+		latest = latest,
+		available = version_is_newer(latest, current) or #missing > 0,
+		repair = #missing > 0,
+		missing = missing
+	})
 end
 
 function action_update()

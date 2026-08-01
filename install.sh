@@ -13,6 +13,8 @@ RESOLVE_IP="${OPENCLASH_EDITOR_RESOLVE_IP:-}"
 ARCHITECTURE="$(uname -m 2>/dev/null || echo unknown)"
 CONFIG_PATH="$(uci -q get openclash.config.config_path 2>/dev/null || true)"
 [ -n "$CONFIG_PATH" ] || CONFIG_PATH="/etc/openclash/config/config.yaml"
+VERSION_TEMP="/tmp/openclash-editor-version.$$"
+trap 'rm -f "$VERSION_TEMP"' EXIT INT TERM
 
 if [ "$(id -u)" != "0" ]; then
   echo "错误：请使用 root 用户运行安装命令。" >&2
@@ -63,7 +65,6 @@ echo "正在安装 OpenClash Visual Editor（系统架构：${ARCHITECTURE}）..
 echo "OpenClash 当前配置：${CONFIG_PATH}"
 
 fetch_file "$BASE_URL/backend.rb" "/usr/share/openclash-editor/backend.rb"
-fetch_file "$BASE_URL/VERSION" "/usr/share/openclash-editor/VERSION"
 fetch_file "$BASE_URL/update.sh" "/usr/share/openclash-editor/update.sh"
 fetch_file "$BASE_URL/luci/controller/openclash_editor.lua" "/usr/lib/lua/luci/controller/openclash_editor.lua"
 fetch_file "$BASE_URL/luci/view/openclash_editor/nodes.htm" "/usr/lib/lua/luci/view/openclash_editor/nodes.htm"
@@ -75,6 +76,7 @@ fetch_file "$BASE_URL/www/editor.css" "/www/luci-static/resources/openclash-edit
 fetch_file "$BASE_URL/portal-watch.sh" "/usr/share/openclash-editor/portal-watch.sh"
 fetch_file "$BASE_URL/openclash-editor-portal.init" "/etc/init.d/openclash-editor-portal"
 fetch_file "$BASE_URL/openclash-editor-portal.hotplug" "/etc/hotplug.d/iface/99-openclash-editor-portal"
+fetch_file "$BASE_URL/VERSION" "$VERSION_TEMP"
 printf '%s\n' "$BASE_URL" > /usr/share/openclash-editor/SOURCE_URL
 printf '%s\n' "scan" > /usr/share/openclash-editor/EDITION
 if [ -n "$RESOLVE_IP" ]; then
@@ -88,7 +90,6 @@ chmod 755 /usr/share/openclash-editor/update.sh
 chmod 755 /usr/share/openclash-editor/portal-watch.sh
 chmod 755 /etc/init.d/openclash-editor-portal
 chmod 755 /etc/hotplug.d/iface/99-openclash-editor-portal
-chmod 644 /usr/share/openclash-editor/VERSION
 chmod 644 /usr/share/openclash-editor/SOURCE_URL
 chmod 644 /usr/share/openclash-editor/EDITION
 [ ! -f "$RESOLVE_IP_FILE" ] || chmod 600 "$RESOLVE_IP_FILE"
@@ -108,6 +109,11 @@ lua /usr/lib/lua/luci/controller/openclash_editor.lua >/dev/null
 
 /etc/init.d/openclash-editor-portal enable
 /etc/init.d/openclash-editor-portal restart
+
+# Publish the new version only after all required files are downloaded,
+# validated and the portal service has started successfully.
+mv "$VERSION_TEMP" /usr/share/openclash-editor/VERSION
+chmod 644 /usr/share/openclash-editor/VERSION
 
 rm -f /tmp/luci-indexcache 2>/dev/null || true
 rm -f /tmp/luci-modulecache/* 2>/dev/null || true
