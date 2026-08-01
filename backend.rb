@@ -527,6 +527,11 @@ def restart_dnsmasq!
   true
 end
 
+def legacy_qr_dhcp_section?(section)
+  name = section.to_s
+  name.start_with?("oce_") && !name.start_with?("oce_slot_")
+end
+
 def activate_slot_dhcp_reservation(mac, target_ip, replaceable_macs = [], reclaim_target = false)
   normalized_mac = mac.to_s.downcase
   raise "无效的设备 MAC 地址" unless normalized_mac.match?(/\A[0-9a-f]{2}(?::[0-9a-f]{2}){5}\z/)
@@ -584,7 +589,7 @@ def qr_managed_device(mac)
   mac = mac.to_s.downcase
   raise "无效的设备 MAC 地址" unless mac.match?(/\A[0-9a-f]{2}(?::[0-9a-f]{2}){5}\z/)
   found = dhcp_host_sections.find do |section, values|
-    section.start_with?("oce_") && !section.start_with?("oce_slot_") && values["mac"].to_s.downcase == mac
+    legacy_qr_dhcp_section?(section) && values["mac"].to_s.downcase == mac
   end
   raise "没有找到该扫码设备，可能已经被删除" unless found
   section, values = found
@@ -602,7 +607,7 @@ def qr_devices_response
   end
   leases_by_mac = active_dhcp_leases.to_h { |lease| [lease["mac"], lease] }
   devices = dhcp_host_sections.filter_map do |section, values|
-    next unless section.start_with?("oce_") && !section.start_with?("oce_slot_")
+    next unless legacy_qr_dhcp_section?(section)
     mac = values["mac"].to_s.downcase
     address = values["ip"].to_s
     next unless mac.match?(/\A[0-9a-f]{2}(?::[0-9a-f]{2}){5}\z/)
@@ -1362,7 +1367,10 @@ def slot_bind_response(identifier, remote_address, force_rebind = false)
       values["ip"].to_s == target_ip && section != target_section &&
         !values["mac"].to_s.empty? && values["mac"].to_s.downcase != mac
     end
-    raise "槽位固定地址 #{target_ip} 被其他 DHCP 配置占用，请先处理冲突" if conflict_for_ip
+    legacy_conflict = conflict_for_ip if conflict_for_ip && legacy_qr_dhcp_section?(conflict_for_ip[0])
+    if conflict_for_ip && !legacy_conflict
+      raise "槽位固定地址 #{target_ip} 被其他 DHCP 配置占用，请先处理冲突"
+    end
     if existing_for_mac && !existing_for_mac[0].start_with?("oce_")
       raise "这台设备已有用户手动创建的 DHCP 固定租约，未自动覆盖"
     end
@@ -1375,6 +1383,7 @@ def slot_bind_response(identifier, remote_address, force_rebind = false)
     changes = {}
     changes[target_ip] = slot["node"].to_s if rules_by_ip[target_ip].to_s != slot["node"].to_s
     sections_to_delete = []
+    sections_to_delete << legacy_conflict[0] if legacy_conflict
     if existing_for_mac && existing_for_mac[0] != target_section
       previous_section, previous_values = existing_for_mac
       sections_to_delete << previous_section
@@ -1411,11 +1420,14 @@ def slot_bind_response(identifier, remote_address, force_rebind = false)
       end
       replacing_device = rebind["bound"] && !rebind["same_device"]
       replaceable_macs = replacing_device ? [slot["mac"]] : []
+      replaceable_macs << legacy_conflict[1]["mac"].to_s.downcase if legacy_conflict
+      replaceable_macs.reject!(&:empty?)
+      replaceable_macs.uniq!
       lease_result = activate_slot_dhcp_reservation(
         mac,
         target_ip,
         replaceable_macs,
-        force_rebind || (replacing_device && rebind["rebind_allowed"])
+        force_rebind || !legacy_conflict.nil? || (replacing_device && rebind["rebind_allowed"])
       )
 
       slots.each do |item|
@@ -1433,7 +1445,7 @@ def slot_bind_response(identifier, remote_address, force_rebind = false)
       slot["last_bound_at"] = Time.now.to_i
       slot["rebind_until"] = 0
       write_slots(slots)
-      schedule_wifi_reconnect(slot["mac"], replacing_device ? replaceable_macs : [])
+      schedule_wifi_reconnect(slot["mac"], replaceable_macs)
     rescue StandardError
       File.binwrite(SOURCE, File.binread(backup)) if backup
       raise

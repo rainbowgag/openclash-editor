@@ -16,6 +16,10 @@ YAML
 
 require_relative "backend"
 
+abort "legacy QR DHCP section was not recognized" unless legacy_qr_dhcp_section?("oce_ead840d70108")
+abort "current slot DHCP section was misclassified as legacy" if legacy_qr_dhcp_section?("oce_slot_16621493998c")
+abort "manual DHCP section was misclassified as legacy" if legacy_qr_dhcp_section?("phone_static")
+
 File.write(lease_path, <<~LEASES)
   2000000000 dc:ad:69:bc:b4:81 192.168.100.147 phone 01:dc:ad:69:bc:b4:81
   2000000001 02:11:22:33:44:55 192.168.100.88 laptop *
