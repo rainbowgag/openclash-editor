@@ -134,10 +134,15 @@ collect_pending_macs() {
   fi
 
   candidates=""
-  lease_file="$(uci -q get dhcp.@dnsmasq[0].leasefile 2>/dev/null || true)"
+  lease_file="${OPENCLASH_EDITOR_DHCP_LEASE_FILE:-}"
+  [ -n "$lease_file" ] || lease_file="$(uci -q get dhcp.@dnsmasq[0].leasefile 2>/dev/null || true)"
   [ -n "$lease_file" ] || lease_file="/tmp/dhcp.leases"
   [ ! -f "$lease_file" ] || candidates="$candidates $(awk '{print tolower($2)}' "$lease_file")"
-  candidates="$candidates $(ip neigh show dev br-lan 2>/dev/null | awk '/lladdr/ {print tolower($3)}')"
+  if command -v iw >/dev/null 2>&1; then
+    for interface in $(iw dev 2>/dev/null | awk '$1 == "Interface" {print $2}'); do
+      candidates="$candidates $(iw dev "$interface" station dump 2>/dev/null | awk '$1 == "Station" {print tolower($2)}')"
+    done
+  fi
 
   pending=""
   seen=" "
