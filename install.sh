@@ -19,6 +19,15 @@ if [ "$(id -u)" != "0" ]; then
   exit 1
 fi
 
+# Switching from the code-binding edition must also remove its captive-portal service.
+if [ -x /etc/init.d/openclash-editor-portal ]; then
+  /etc/init.d/openclash-editor-portal disable >/dev/null 2>&1 || true
+  /etc/init.d/openclash-editor-portal stop >/dev/null 2>&1 || true
+fi
+rm -f /usr/share/openclash-editor/portal-watch.sh
+rm -f /etc/init.d/openclash-editor-portal
+rm -f /etc/hotplug.d/iface/99-openclash-editor-portal
+
 if [ ! -x /usr/bin/ruby ] || ! ruby -ryaml -e 'exit 0' >/dev/null 2>&1; then
   echo "错误：缺少 Ruby YAML 支持，请先安装 ruby、ruby-yaml 和 ruby-psych。" >&2
   exit 1
@@ -93,6 +102,7 @@ chmod 644 /www/luci-static/resources/openclash-editor/editor-common.js
 chmod 644 /www/luci-static/resources/openclash-editor/editor.css
 
 rm -f /usr/lib/lua/luci/view/openclash_editor/index.htm
+rm -f /usr/lib/lua/luci/view/openclash_editor/slots.htm
 
 ruby -c /usr/share/openclash-editor/backend.rb >/dev/null
 lua /usr/lib/lua/luci/controller/openclash_editor.lua >/dev/null
