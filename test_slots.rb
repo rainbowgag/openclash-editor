@@ -78,6 +78,16 @@ abort "slot node update failed" unless updated.dig("slot", "node") == "second-no
 config = YAML.load_file(config_path, aliases: true)
 abort "updated slot rule missing" unless Array(config["rules"]).include?("SRC-IP-CIDR,#{first['ip']}/32,second-node")
 
+code_updated = slot_code_update_response(first["id"], "h377")
+abort "slot code update failed" unless code_updated.dig("slot", "code") == "H377"
+abort "updated slot code was not persisted" unless slot_by_code!(read_slots, "h377")["id"] == first["id"]
+begin
+  slot_code_update_response(first["id"], "002")
+  abort "duplicate slot code was accepted"
+rescue StandardError => error
+  abort "duplicate slot code returned wrong error" unless error.message.include?("已被其他槽位使用")
+end
+
 regenerated = slot_regenerate_response(first["id"])
 new_token = regenerated.dig("slot", "token")
 abort "slot token was not regenerated" if new_token == old_token

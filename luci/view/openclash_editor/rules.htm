@@ -1,5 +1,5 @@
 <%+header%>
-<link rel="stylesheet" href="<%=resource%>/openclash-editor/editor.css?v=2.2.1">
+<link rel="stylesheet" href="<%=resource%>/openclash-editor/editor.css?v=2.2.2">
 <div class="oce-shell">
   <div class="oce-hero"><div><h2>设备规则与应用</h2><p>网段识别 · 规则分配 · YAML 预览与安全应用</p></div><div class="oce-hero-actions"><span id="version" class="oce-version"></span></div></div>
   <div class="oce-nav"><a href="<%=luci.dispatcher.build_url('admin','services','openclash','visual-editor')%>">① 节点管理</a><a class="active" href="<%=luci.dispatcher.build_url('admin','services','openclash','visual-editor-rules')%>">② 设备规则与应用</a><a href="<%=luci.dispatcher.build_url('admin','services','openclash','visual-editor-qr')%>">③ 口令绑定</a></div>
@@ -13,7 +13,7 @@
 
   <div class="oce-card oce-system"><h3>预览并应用正式配置</h3><p>先生成测试副本并进行 YAML 校验。确认差异无误后才可应用；应用时会自动备份正式配置，并在写入成功后重启 OpenClash 使规则生效。</p><div class="oce-actions"><button id="preview_btn" class="btn cbi-button cbi-button-action" type="button">生成测试副本并预览</button></div><div id="result" style="display:none"><h4>修改差异</h4><pre id="diff" class="oce-preview oce-scroll"></pre><details><summary>查看完整测试配置</summary><pre id="preview" class="oce-preview oce-scroll"></pre></details><div class="cbi-page-actions"><button id="apply_btn" class="btn cbi-button cbi-button-apply" disabled type="button">应用正式配置</button></div></div></div>
 </div>
-<script src="<%=resource%>/openclash-editor/editor-common.js?v=2.2.1"></script>
+<script src="<%=resource%>/openclash-editor/editor-common.js?v=2.2.2"></script>
 <script>
 (function(){
   var E=OpenClashEditor,draft,token='',selectedRuleIps=Object.create(null);var urls={state:'<%=luci.dispatcher.build_url("admin","services","openclash","visual-editor-state")%>',preview:'<%=luci.dispatcher.build_url("admin","services","openclash","visual-editor-preview")%>',apply:'<%=luci.dispatcher.build_url("admin","services","openclash","visual-editor-apply")%>'};E.configure(urls);

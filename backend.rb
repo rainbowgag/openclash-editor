@@ -147,11 +147,14 @@ def random_hex(bytes)
 end
 
 def slot_code!(value)
-  raw = value.to_s.strip
-  raise "请输入槽位口令" unless raw.match?(/\A\d{1,6}\z/)
-  number = raw.to_i
-  raise "槽位口令无效" unless number.positive?
-  format("%03d", number)
+  raw = value.to_s.strip.upcase
+  raise "请输入槽位口令" unless raw.match?(/\A[A-Z0-9]{1,12}\z/)
+  if raw.match?(/\A\d+\z/)
+    number = raw.to_i
+    raise "槽位口令无效" unless number.positive?
+    return format("%03d", number)
+  end
+  raw
 end
 
 def normalize_slot_codes!(slots)
@@ -190,7 +193,10 @@ end
 
 def next_slot_code(slots)
   normalize_slot_codes!(slots)
-  highest = Array(slots).map { |slot| slot["code"].to_s.to_i }.max.to_i
+  highest = Array(slots).filter_map do |slot|
+    code = slot["code"].to_s
+    code.to_i if code.match?(/\A\d+\z/)
+  end.max.to_i
   format("%03d", highest + 1)
 end
 
@@ -1139,6 +1145,22 @@ def slot_update_response(id, node_name)
   end
 end
 
+def slot_code_update_response(id, code_value)
+  with_slot_lock do
+    slots = read_slots
+    slot = slot_by_id!(slots, id)
+    code = slot_code!(code_value)
+    duplicate = slots.find { |item| item["id"].to_s != slot["id"].to_s && item["code"].to_s == code }
+    raise "槽位口令 #{code} 已被其他槽位使用" if duplicate
+    return { "ok" => true, "slot" => slot, "unchanged" => true } if slot["code"].to_s == code
+
+    slot["code"] = code
+    slot["updated_at"] = Time.now.to_i
+    write_slots(slots)
+    { "ok" => true, "slot" => slot, "unchanged" => false }
+  end
+end
+
 def slot_regenerate_response(id)
   with_slot_lock do
     slots = read_slots
@@ -1828,6 +1850,7 @@ if __FILE__ == $PROGRAM_NAME
              when "slot-bind" then slot_bind_response(ARGV.fetch(1), ARGV.fetch(2))
              when "slot-code-bind" then slot_code_bind_response(ARGV.fetch(1), ARGV.fetch(2))
              when "slot-update" then slot_update_response(ARGV.fetch(1), ARGV.fetch(2))
+             when "slot-code-update" then slot_code_update_response(ARGV.fetch(1), ARGV.fetch(2))
              when "slot-regenerate" then slot_regenerate_response(ARGV.fetch(1))
              when "slot-rebind" then slot_rebind_response(ARGV.fetch(1), ARGV.fetch(2))
              when "slot-refresh-lease" then slot_refresh_lease_response(ARGV.fetch(1))

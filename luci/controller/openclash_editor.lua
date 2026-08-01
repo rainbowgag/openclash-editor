@@ -75,6 +75,7 @@ function index()
 	entry({"admin", "services", "openclash", "visual-editor-slots-create-many"}, call("action_slots_create_many")).leaf = true
 	entry({"admin", "services", "openclash", "visual-editor-slots-plan"}, call("action_slots_plan")).leaf = true
 	entry({"admin", "services", "openclash", "visual-editor-slot-update"}, call("action_slot_update")).leaf = true
+	entry({"admin", "services", "openclash", "visual-editor-slot-code-update"}, call("action_slot_code_update")).leaf = true
 	entry({"admin", "services", "openclash", "visual-editor-slot-regenerate"}, call("action_slot_regenerate")).leaf = true
 	entry({"admin", "services", "openclash", "visual-editor-slot-rebind"}, call("action_slot_rebind")).leaf = true
 	entry({"admin", "services", "openclash", "visual-editor-slot-refresh-lease"}, call("action_slot_refresh_lease")).leaf = true
@@ -322,6 +323,25 @@ function action_slot_update()
 	if not ok then reply(false, { error = "修改扫码槽位失败", details = err }) end
 end
 
+function action_slot_code_update()
+	if not require_post() then return end
+	local ok, err = xpcall(function()
+		local id = http.formvalue("id") or ""
+		local code = http.formvalue("code") or ""
+		if type(id) ~= "string" or not id:match("^[0-9a-f]+$") or #id ~= 12 then
+			return reply(false, { error = "扫码槽位编号无效" })
+		end
+		if type(code) ~= "string" or not code:match("^[A-Za-z0-9]+$") or #code > 12 then
+			return reply(false, { error = "口令必须是 1 至 12 位字母或数字" })
+		end
+		local result, backend_err, details = run_backend("slot-code-update " .. shellquote(id) .. " " .. shellquote(code))
+		if not result then return reply(false, { error = backend_err, details = details }) end
+		if not result.ok then return reply(false, result) end
+		reply(true, result)
+	end, debug.traceback)
+	if not ok then reply(false, { error = "修改槽位口令失败", details = err }) end
+end
+
 function action_slot_regenerate()
 	local ok, err = xpcall(function() slot_id_action("slot-regenerate", false) end, debug.traceback)
 	if not ok then reply(false, { error = "重置扫码槽位二维码失败", details = err }) end
@@ -458,10 +478,10 @@ end
 local function code_bind_form(error_message)
 	local warning = error_message and error_message ~= "" and
 		("<p style=\"color:#b42318;font-weight:700\">" .. pcdata(error_message) .. "</p>") or
-		"<p>请输入管理员分配的槽位口令，例如 <strong>001</strong>。</p>"
+		"<p>请输入管理员分配的槽位口令，例如 <strong>001</strong> 或 <strong>H377</strong>。</p>"
 	local body = warning ..
 		"<form method=\"post\" action=\"\">" ..
-		"<input class=\"input\" name=\"code\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]*\" maxlength=\"6\" autocomplete=\"one-time-code\" autofocus placeholder=\"001\">" ..
+		"<input class=\"input\" name=\"code\" type=\"text\" inputmode=\"text\" pattern=\"[A-Za-z0-9]*\" maxlength=\"12\" autocapitalize=\"characters\" autocomplete=\"one-time-code\" autofocus placeholder=\"001 或 H377\">" ..
 		"<button class=\"btn\" type=\"submit\">绑定并连接网络</button></form>" ..
 		"<p class=\"hint\">绑定会让当前手机替换该槽位原来的设备，并自动获取槽位固定 IP。请勿把口令交给其他设备使用。</p>"
 	qr_bind_page("设备口令绑定", body, error_message and "error" or "warn")
@@ -474,8 +494,8 @@ local function code_bind_impl()
 	local code = http.formvalue("code") or ""
 	if type(code) == "table" then code = code[1] or "" end
 	code = tostring(code):gsub("^%s+", ""):gsub("%s+$", "")
-	if not code:match("^%d+$") or #code > 6 then
-		return code_bind_form("口令格式不正确，请输入纯数字口令。")
+	if not code:match("^[A-Za-z0-9]+$") or #code > 12 then
+		return code_bind_form("口令格式不正确，请输入 1 至 12 位字母或数字。")
 	end
 	local remote_address = http.getenv("REMOTE_ADDR") or ""
 	local result, err, details = run_backend("slot-code-bind " .. shellquote(code) .. " " .. shellquote(remote_address))
