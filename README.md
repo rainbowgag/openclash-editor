@@ -54,7 +54,7 @@
 执行下面一条命令后，输入 `1` 安装扫码绑定版，输入 `2` 安装手动绑定 IP 版：
 
 ```sh
-rm -f /tmp/openclash-editor-install.sh; (curl -fL --resolve yy.yaml.uk:9443:103.27.78.68 --connect-timeout 20 --max-time 120 --retry 2 --show-error -o /tmp/openclash-editor-install.sh 'https://yy.yaml.uk:9443/openclash-editor/install.sh' || curl -fL --resolve yy.yaml.uk:80:103.27.78.68 --connect-timeout 20 --max-time 120 --retry 2 --show-error -o /tmp/openclash-editor-install.sh 'http://yy.yaml.uk/openclash-editor/install.sh') && sh /tmp/openclash-editor-install.sh
+rm -f /tmp/openclash-editor-install.sh; (curl -fL --resolve yy.yaml.uk:9443:103.27.78.68 --connect-timeout 20 --max-time 120 --retry 2 --show-error -o /tmp/openclash-editor-install.sh 'https://yy.yaml.uk:9443/openclash-editor/install.sh' || curl -fL --connect-timeout 20 --max-time 120 --retry 2 --show-error -o /tmp/openclash-editor-install.sh 'http://103.27.78.68/openclash-editor/install.sh') && sh /tmp/openclash-editor-install.sh
 ```
 
 ### 扫码绑定正式版
@@ -62,7 +62,7 @@ rm -f /tmp/openclash-editor-install.sh; (curl -fL --resolve yy.yaml.uk:9443:103.
 下面的命令直接安装扫码绑定正式版。`--resolve` 可在路由器本地 DNS 暂时不可用时仍然校验证书并下载，安装后的在线更新也会记住该解析地址：
 
 ```sh
-rm -f /tmp/openclash-editor-scan.sh; BASE_URL='https://yy.yaml.uk:9443/openclash-editor/scan'; (curl -fL --resolve yy.yaml.uk:9443:103.27.78.68 --connect-timeout 20 --max-time 120 --retry 2 --show-error -o /tmp/openclash-editor-scan.sh "${BASE_URL}/install.sh" || { BASE_URL='http://yy.yaml.uk/openclash-editor/scan'; curl -fL --resolve yy.yaml.uk:80:103.27.78.68 --connect-timeout 20 --max-time 120 --retry 2 --show-error -o /tmp/openclash-editor-scan.sh "${BASE_URL}/install.sh"; }) && OPENCLASH_EDITOR_BASE_URL="$BASE_URL" OPENCLASH_EDITOR_RESOLVE_IP='103.27.78.68' sh /tmp/openclash-editor-scan.sh
+rm -f /tmp/openclash-editor-scan.sh; BASE_URL='https://yy.yaml.uk:9443/openclash-editor/scan'; (curl -fL --resolve yy.yaml.uk:9443:103.27.78.68 --connect-timeout 20 --max-time 120 --retry 2 --show-error -o /tmp/openclash-editor-scan.sh "${BASE_URL}/install.sh" || { BASE_URL='http://103.27.78.68/openclash-editor/scan'; curl -fL --connect-timeout 20 --max-time 120 --retry 2 --show-error -o /tmp/openclash-editor-scan.sh "${BASE_URL}/install.sh"; }) && OPENCLASH_EDITOR_BASE_URL="$BASE_URL" OPENCLASH_EDITOR_RESOLVE_IP='103.27.78.68' sh /tmp/openclash-editor-scan.sh
 ```
 
 ### 中国大陆镜像（推荐）
