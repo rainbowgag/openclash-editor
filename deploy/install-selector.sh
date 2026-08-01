@@ -5,7 +5,8 @@ set -eu
 MIRROR_HOST="yy.yaml.uk"
 MIRROR_PORT="9443"
 MIRROR_IP="${OPENCLASH_EDITOR_RESOLVE_IP:-103.27.78.68}"
-MIRROR_ROOT="https://${MIRROR_HOST}:${MIRROR_PORT}/openclash-editor"
+HTTPS_ROOT="https://${MIRROR_HOST}:${MIRROR_PORT}/openclash-editor"
+HTTP_ROOT="http://${MIRROR_HOST}/openclash-editor"
 TEMPORARY="/tmp/openclash-editor-selected-install.sh"
 EDITION="${OPENCLASH_EDITOR_EDITION:-}"
 
@@ -35,12 +36,12 @@ case "$EDITION" in
   1|qr|scan)
     EDITION="scan"
     LABEL="扫码绑定版"
-    BASE_URL="${MIRROR_ROOT}/scan"
+    CHANNEL="scan"
     ;;
   2|manual|ip)
     EDITION="manual"
     LABEL="手动绑定 IP 版"
-    BASE_URL="${MIRROR_ROOT}/manual-ip"
+    CHANNEL="manual-ip"
     ;;
   *)
     echo "错误：请输入 1 或 2。" >&2
@@ -48,17 +49,46 @@ case "$EDITION" in
     ;;
 esac
 
-echo "正在准备安装：${LABEL}"
+fetch_candidate() {
+  candidate="$1"
+  port="$2"
+  rm -f "$TEMPORARY"
+
+  case "$DOWNLOADER" in
+    curl)
+      curl -fL --resolve "${MIRROR_HOST}:${port}:${MIRROR_IP}" \
+      --connect-timeout 20 --max-time 120 --retry 2 --show-error --silent \
+      "${candidate}/install.sh" -o "$TEMPORARY"
+      ;;
+    wget)
+      wget -T 20 -t 2 -O "$TEMPORARY" "${candidate}/install.sh"
+      ;;
+    uclient-fetch)
+      uclient-fetch -T 20 -O "$TEMPORARY" "${candidate}/install.sh"
+      ;;
+  esac
+}
+
 if command -v curl >/dev/null 2>&1; then
-  curl -fL --resolve "${MIRROR_HOST}:${MIRROR_PORT}:${MIRROR_IP}" \
-    --connect-timeout 20 --max-time 120 --retry 2 --show-error --silent \
-    "${BASE_URL}/install.sh" -o "$TEMPORARY"
+  DOWNLOADER="curl"
 elif command -v wget >/dev/null 2>&1; then
-  wget -T 20 -t 2 -O "$TEMPORARY" "${BASE_URL}/install.sh"
+  DOWNLOADER="wget"
 elif command -v uclient-fetch >/dev/null 2>&1; then
-  uclient-fetch -T 20 -O "$TEMPORARY" "${BASE_URL}/install.sh"
+  DOWNLOADER="uclient-fetch"
 else
   echo "错误：系统缺少 curl、wget 或 uclient-fetch。" >&2
+  exit 1
+fi
+
+echo "正在准备安装：${LABEL}"
+if fetch_candidate "${HTTPS_ROOT}/${CHANNEL}" "$MIRROR_PORT"; then
+  BASE_URL="${HTTPS_ROOT}/${CHANNEL}"
+  echo "下载通道：HTTPS"
+elif fetch_candidate "${HTTP_ROOT}/${CHANNEL}" "80"; then
+  BASE_URL="${HTTP_ROOT}/${CHANNEL}"
+  echo "提示：HTTPS 连接失败，已自动使用 HTTP 兼容通道。" >&2
+else
+  echo "错误：HTTPS 和 HTTP 下载通道均不可用，请检查路由器联网状态。" >&2
   exit 1
 fi
 
