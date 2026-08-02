@@ -613,9 +613,18 @@ end
 function action_restart()
 	if not require_post() then return end
 	local ok, err = xpcall(function()
+		local repair_result, repair_error, repair_details = run_backend("slots-repair")
+		if not repair_result then
+			return reply(false, { error = repair_error or "修复槽位规则失败", details = repair_details })
+		end
+		if not repair_result.ok then return reply(false, repair_result) end
 		local restart_ok, restart_error = schedule_openclash_restart()
 		if not restart_ok then return reply(false, { error = restart_error }) end
-		reply(true, { message = "OpenClash 正在后台重启" })
+		reply(true, {
+			message = "槽位规则已校验，OpenClash 正在后台重启",
+			repaired_count = repair_result.repaired_count or 0,
+			backup = repair_result.backup
+		})
 	end, debug.traceback)
 	if not ok then reply(false, { error = "重启 OpenClash 失败", details = err }) end
 end

@@ -1001,6 +1001,46 @@ def slots_response
   }
 end
 
+def slots_repair_response
+  with_slot_lock do
+    config = load_config
+    node_names = Array(config["proxies"]).filter_map do |node|
+      node["name"].to_s if node.is_a?(Hash) && !node["name"].to_s.empty?
+    end
+    slots, created, updated = augment_slots_from_rules(read_slots, device_rules(config), node_names)
+    invalid = slots.reject { |slot| node_names.include?(slot["node"].to_s) }
+    unless invalid.empty?
+      details = invalid.first(10).map do |slot|
+        "#{slot['code']}（#{slot['ip']}，#{slot['node']}）"
+      end
+      raise "以下槽位引用的节点已不存在，请先修改槽位节点：#{details.join('、')}"
+    end
+
+    rules_by_ip = {}
+    device_rules(config).each do |rule|
+      parts = rule_parts(rule)
+      rules_by_ip[parts["ip"]] = parts["name"] if parts
+    end
+    changes = {}
+    slots.each do |slot|
+      address = slot["ip"].to_s
+      node_name = slot["node"].to_s
+      changes[address] = node_name if rules_by_ip[address].to_s != node_name
+    end
+
+    write_slots(slots) if created.any? || updated.positive?
+    backup = changes.empty? ? nil : apply_qr_rule_changes(changes)
+    {
+      "ok" => true,
+      "slot_count" => slots.length,
+      "repaired_count" => changes.length,
+      "auto_created_count" => created.length,
+      "auto_updated_count" => updated,
+      "backup" => backup.to_s
+    }
+  end
+end
+
 def slots_create_response(node_name, count_value, prefix_value, start_value)
   with_slot_lock do
     node_name = node_name.to_s.strip
@@ -1215,6 +1255,7 @@ def slot_refresh_lease_response(id)
     end
 
     lease_result = activate_slot_dhcp_reservation(mac, target_ip)
+    schedule_wifi_reconnect(mac) if lease_result["reconnect_required"]
     {
       "ok" => true,
       "slot" => slot,
@@ -1339,11 +1380,14 @@ def schedule_wifi_reconnect(*macs)
   end.uniq
   return false if valid.empty?
 
-  calls = valid.map do |mac|
-    payload = json_generate({ "addr" => mac, "reason" => 5, "deauth" => true, "ban_time" => 0 })
-    "for obj in $(ubus list 'hostapd.*' 2>/dev/null); do ubus call \"$obj\" del_client '#{payload}' >/dev/null 2>&1 || true; done"
+  calls = [2, 4, 6].map do |delay|
+    attempts = valid.map do |mac|
+      payload = json_generate({ "addr" => mac, "reason" => 5, "deauth" => true, "ban_time" => 0 })
+      "echo \"$(date '+%F %T') deauth #{mac}\"; for obj in $(ubus list 'hostapd.*' 2>/dev/null); do ubus call \"$obj\" del_client '#{payload}' 2>&1 || true; done"
+    end.join("; ")
+    "sleep #{delay}; #{attempts}"
   end.join("; ")
-  system("sh", "-c", "(sleep 2; #{calls}) >/tmp/openclash-editor-portal-reconnect.log 2>&1 &")
+  system("sh", "-c", "(#{calls}) >/tmp/openclash-editor-portal-reconnect.log 2>&1 &")
 end
 
 def slot_bind_response(identifier, remote_address, force_rebind = false)
@@ -1689,11 +1733,13 @@ def replace_device_rules(lines, rules)
     stripped = line.strip
     stripped.start_with?("- SRC-IP-CIDR,") || stripped.match?(/^# OPENCLASH-EDITOR:RULES:(?:BEGIN|END)$/)
   end
+  existing_item = lines[(header + 1)...finish].find { |line| line.match?(/^\s*-\s+/) }
+  item_indent = existing_item ? existing_item[/^\s*/] : "  "
   replacement = [
     "rules:",
-    "  # OPENCLASH-EDITOR:RULES:BEGIN",
-    *rules.map { |rule| "  - #{rule}" },
-    "  # OPENCLASH-EDITOR:RULES:END",
+    "#{item_indent}# OPENCLASH-EDITOR:RULES:BEGIN",
+    *rules.map { |rule| "#{item_indent}- #{rule}" },
+    "#{item_indent}# OPENCLASH-EDITOR:RULES:END",
     *kept
   ]
   lines[header...finish] = replacement
@@ -1854,6 +1900,7 @@ if __FILE__ == $PROGRAM_NAME
              when "qr-device-delete" then qr_device_delete_response(ARGV.fetch(1), ARGV[2] == "1")
              when "qr-devices-delete" then qr_devices_delete_response(ARGV.fetch(1), ARGV[2] == "1")
              when "slots" then slots_response
+             when "slots-repair" then slots_repair_response
              when "slots-create" then slots_create_response(ARGV.fetch(1), ARGV.fetch(2), ARGV.fetch(3), ARGV.fetch(4))
              when "slots-create-many" then slots_create_many_response(ARGV.fetch(1))
              when "slots-plan" then slots_plan_response(ARGV.fetch(1))

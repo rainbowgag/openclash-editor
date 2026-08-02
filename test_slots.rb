@@ -52,6 +52,16 @@ slots.each do |slot|
   abort "slot rule missing: #{expected}" unless Array(config["rules"]).include?(expected)
 end
 
+missing_rule_slot = slots.last
+missing_rule = "- SRC-IP-CIDR,#{missing_rule_slot['ip']}/32,#{missing_rule_slot['node']}"
+File.write(config_path, File.readlines(config_path).reject { |line| line.strip == missing_rule }.join)
+broken_slot = slots_response["slots"].find { |slot| slot["id"] == missing_rule_slot["id"] }
+abort "missing slot rule was not detected" if broken_slot["rule_ok"]
+repaired = slots_repair_response
+abort "missing slot rule was not repaired" unless repaired["repaired_count"] == 1
+repaired_slot = slots_response["slots"].find { |slot| slot["id"] == missing_rule_slot["id"] }
+abort "repaired slot rule still reports a mismatch" unless repaired_slot["rule_ok"]
+
 first = slots.first
 old_token = first["token"]
 bound_probe = first.merge("mac" => "02:11:22:33:44:55", "rebind_until" => 0)
