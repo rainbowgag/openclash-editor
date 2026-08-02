@@ -247,6 +247,67 @@
     }
   }
 
+  function base64Text(value, label) {
+    var payload = decodeUserinfo(value).replace(/-/g, '+').replace(/_/g, '/').replace(/\s+/g, '');
+    if (!payload || !/^[A-Za-z0-9+/]*={0,2}$/.test(payload)) {
+      throw new Error((label || 'Base64') + ' 格式错误');
+    }
+    while (payload.length % 4) payload += '=';
+    try {
+      var binary = atob(payload);
+      var bytes = Uint8Array.from(binary, function(ch) { return ch.charCodeAt(0); });
+      return new TextDecoder('utf-8').decode(bytes);
+    } catch (_) {
+      throw new Error((label || 'Base64') + ' 无法解码');
+    }
+  }
+
+  function shadowsocksCredentials(value) {
+    var credentials = decodeUserinfo(value);
+    if (credentials.indexOf(':') < 0) credentials = base64Text(credentials, 'SS 用户信息');
+    var colon = credentials.indexOf(':');
+    if (colon <= 0 || colon === credentials.length - 1) {
+      throw new Error('SS 加密方式或密码不能为空');
+    }
+    return {
+      cipher: credentials.slice(0, colon).trim().toLowerCase(),
+      password: credentials.slice(colon + 1)
+    };
+  }
+
+  function parseShadowsocks(link, dialer) {
+    var part = splitLink(link, 'ss://');
+    var authority = part.authority;
+    while (authority.slice(-1) === '/') authority = authority.slice(0, -1);
+    if (!authority) throw new Error('SS 链接内容为空');
+
+    var at = authority.lastIndexOf('@'), credentials, hp;
+    if (at > 0) {
+      credentials = shadowsocksCredentials(authority.slice(0, at));
+      hp = hostPort(authority.slice(at + 1), -1);
+    } else {
+      var decoded = base64Text(authority, 'SS 链接');
+      at = decoded.lastIndexOf('@');
+      if (at <= 0) throw new Error('SS 链接缺少服务器或端口');
+      credentials = shadowsocksCredentials(decoded.slice(0, at));
+      hp = hostPort(decoded.slice(at + 1), -1);
+    }
+    if (!hp.server || !hp.port || hp.port < 1 || hp.port > 65535) {
+      throw new Error('SS 服务器或端口格式错误');
+    }
+    if (part.params.get('plugin')) {
+      throw new Error('当前 SS 链接包含尚未支持的 plugin 参数');
+    }
+
+    var node = {
+      name: part.name || 'SS ' + hp.server + ':' + hp.port,
+      type: 'ss', server: hp.server, port: hp.port,
+      cipher: credentials.cipher, password: credentials.password, udp: true
+    };
+    if (dialer) node['dialer-proxy'] = dialer;
+    return node;
+  }
+
   function parseSocks(link, dialer) {
     var value = link.trim(), lower = value.toLowerCase();
     var hp, credentials, name = '';
@@ -287,6 +348,7 @@
     if (lower.indexOf('vmess://') === 0) return parseVmess(link, dialer);
     if (lower.indexOf('hysteria2://') === 0 || lower.indexOf('hy2://') === 0) return parseHy2(link, dialer);
     if (lower.indexOf('trojan://') === 0 || lower.indexOf('trojan-go://') === 0) return parseTrojan(link, dialer);
+    if (lower.indexOf('ss://') === 0) return parseShadowsocks(link, dialer);
     if (lower.indexOf('socks5://') === 0 || lower.indexOf('socks://') === 0 || link.indexOf('@') >= 0 || /^(\[[^\]]+\]|[^:\s]+):\d{1,5}:[^:]+:.+$/.test(link)) return parseSocks(link, dialer);
     throw new Error('不支持的节点格式');
   }
