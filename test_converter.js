@@ -40,6 +40,28 @@ socksResult.nodes.forEach((item, index) => {
 });
 console.log(JSON.stringify(socksResult.nodes));
 
+const ssInput = [
+  'ss://YWVzLTI1Ni1nY206MTkxOQ==@gd.mitwo.top:19322#%E7%BE%8E%E5%9B%BD8.6',
+  'ss://YWVzLTEyOC1nY206c2VjcmV0QDE5Mi4wLjIuMTA6ODM4OA==#legacy-ss',
+  'ss://chacha20-ietf-poly1305:p%40ss@[2001:db8::10]:443#ipv6-ss'
+].join('\n');
+const ssResult = OpenClashConverter.convert(ssInput, '中转');
+if (ssResult.errors.length) throw new Error(ssResult.errors.join('\n'));
+if (ssResult.nodes.length !== 3) throw new Error('expected 3 Shadowsocks nodes');
+const expectedSs = [
+  ['美国8.6', 'gd.mitwo.top', 19322, 'aes-256-gcm', '1919'],
+  ['legacy-ss', '192.0.2.10', 8388, 'aes-128-gcm', 'secret'],
+  ['ipv6-ss', '2001:db8::10', 443, 'chacha20-ietf-poly1305', 'p@ss']
+];
+ssResult.nodes.forEach((item, index) => {
+  const expected = expectedSs[index];
+  if (item.name !== expected[0] || item.type !== 'ss' || item.server !== expected[1] || item.port !== expected[2] || item.cipher !== expected[3] || item.password !== expected[4] || item.udp !== true) {
+    throw new Error(`invalid Shadowsocks node ${index + 1}: ${JSON.stringify(item)}`);
+  }
+  if (item['dialer-proxy'] !== '中转') throw new Error(`missing Shadowsocks dialer-proxy ${index + 1}`);
+});
+console.log(JSON.stringify(ssResult.nodes));
+
 const numbered = Array.from({length: 10}, (_, index) => ({name: `old-${index + 1}`}));
 OpenClashEditor.numberNodes(numbered, '美国', 5);
 if (numbered[0].name !== '美国5' || numbered[9].name !== '美国14') throw new Error('bulk node numbering failed');
