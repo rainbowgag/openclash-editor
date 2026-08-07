@@ -116,6 +116,36 @@ abort "group slot state count mismatch" unless slots.length == 4
 abort "group slot naming failed" unless group["created"].map { |slot| slot["name"] }.sort == ["second-node-槽位1", "test-node-槽位1"].sort
 abort "group slot codes were not continued" unless group["created"].map { |slot| slot["code"] } == %w[003 004]
 
+import_plan_request = "/tmp/openclash-editor-slot-code-import-unit.json"
+File.write(import_plan_request, json_generate({
+  "slot_requests" => [
+    { "node" => "test-node", "code" => "h60" },
+    { "node" => "test-node", "code" => "760" },
+    { "node" => "second-node", "code" => "H75" }
+  ],
+  "available_nodes" => ["test-node", "second-node"],
+  "slots" => slots,
+  "used_ips" => device_rules(load_config).map { |rule| rule_parts(rule)["ip"] }
+}))
+import_planned = slots_plan_response(import_plan_request)
+abort "custom code import count mismatch" unless import_planned["created_count"] == 3
+abort "custom codes changed" unless import_planned["created"].map { |slot| slot["code"] } == %w[H60 760 H75]
+abort "repeated node slot naming failed" unless import_planned["created"].map { |slot| slot["name"] } == ["test-node-槽位2", "test-node-槽位3", "second-node-槽位2"]
+[["002", "002"], ["h377", "H377"]].each do |raw_code, expected_code|
+  File.write(import_plan_request, json_generate({
+    "slot_requests" => [{ "node" => "test-node", "code" => raw_code }],
+    "available_nodes" => ["test-node", "second-node"],
+    "slots" => slots,
+    "used_ips" => []
+  }))
+  begin
+    slots_plan_response(import_plan_request)
+    abort "existing custom code collision was not rejected"
+  rescue StandardError => error
+    raise unless error.message.include?("槽位口令已存在：#{expected_code}")
+  end
+end
+
 plan_request = "/tmp/openclash-editor-slot-plan-unit.json"
 current_rules = device_rules(load_config)
 File.write(plan_request, json_generate({

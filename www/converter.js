@@ -353,13 +353,47 @@
     throw new Error('不支持的节点格式');
   }
 
+  function normalizeSlotCode(value) {
+    var code = String(value || '').trim().toUpperCase();
+    if (!/^[A-Z0-9]{1,12}$/.test(code)) throw new Error('口令必须是 1 至 12 位字母或数字');
+    if (/^\d+$/.test(code)) {
+      var number = Number(code);
+      if (!Number.isInteger(number) || number <= 0) throw new Error('纯数字口令必须大于 0');
+      code = String(number);
+      while (code.length < 3) code = '0' + code;
+    }
+    return code;
+  }
+
+  function splitSlotCodes(line) {
+    var marker = line.lastIndexOf('---');
+    if (marker < 0) return { link: line, codes: [] };
+    var link = line.slice(0, marker).trim();
+    var suffix = line.slice(marker + 3).trim();
+    if (!link) throw new Error('口令前缺少节点链接');
+    if (!suffix) throw new Error('--- 后面没有填写口令');
+    var seen = Object.create(null);
+    var codes = suffix.split(/[\s,，]+/).filter(Boolean).map(function(value) {
+      var code = normalizeSlotCode(value);
+      if (seen[code]) throw new Error('同一节点的口令重复：' + code);
+      seen[code] = true;
+      return code;
+    });
+    if (!codes.length) throw new Error('--- 后面没有填写有效口令');
+    return { link: link, codes: codes };
+  }
+
   function convert(text, dialer) {
-    var nodes = [], errors = [];
+    var nodes = [], errors = [], slotCodes = [];
     String(text || '').split(/\r?\n/).map(function(v) { return v.trim(); }).filter(Boolean).forEach(function(line, index) {
-      try { nodes.push(parse(line, String(dialer || '').trim())); }
+      try {
+        var input = splitSlotCodes(line);
+        nodes.push(parse(input.link, String(dialer || '').trim()));
+        slotCodes.push(input.codes);
+      }
       catch (error) { errors.push('第 ' + (index + 1) + ' 行：' + error.message); }
     });
-    return { nodes: nodes, errors: errors };
+    return { nodes: nodes, errors: errors, slot_codes: slotCodes };
   }
 
   global.OpenClashConverter = { convert: convert };

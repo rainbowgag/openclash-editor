@@ -1,5 +1,5 @@
 <%+header%>
-<link rel="stylesheet" href="<%=resource%>/openclash-editor/editor.css?v=2.2.5">
+<link rel="stylesheet" href="<%=resource%>/openclash-editor/editor.css?v=2.2.9">
 <div class="oce-shell">
   <div class="oce-hero">
     <div><h2>OpenClash 可视编辑器</h2><p>节点管理 · 所有编辑先保存在浏览器草稿中</p></div>
@@ -10,7 +10,7 @@
 
   <div class="oce-card oce-system">
     <div class="oce-actions" style="justify-content:space-between"><h3>批量添加节点</h3><div class="oce-actions"><label class="oce-check-label"><input id="bulk_rename_enabled" class="oce-check" type="checkbox"> 批量修改节点名称</label><button id="bulk_rename_btn" class="btn cbi-button" type="button" disabled>批量更改节点名称</button></div></div>
-    <div class="oce-grid"><div><label for="links"><strong>节点链接（每行一条）</strong></label><textarea id="links" class="oce-input oce-code" rows="10" placeholder="vless://...&#10;vmess://...&#10;hysteria2://...&#10;trojan://...&#10;trojan-go://...&#10;ss://...&#10;socks5://用户名:密码@IP:端口&#10;socks://Base64认证@IP:端口"></textarea></div><div><p><strong>支持协议：</strong>VLESS、VMess、Hysteria2/Hy2、Trojan/Trojan-Go、Shadowsocks/SS、SOCKS5</p><div class="oce-actions"><label class="oce-check-label"><input id="add_to_pr" class="oce-check" type="checkbox"> 自动将首个节点设为路由器代理节点</label><label class="oce-check-label"><input id="auto_create_slots" class="oce-check" type="checkbox" checked> 为本次转换的每个节点自动创建口令槽位</label></div><div class="oce-actions" style="margin-top:16px"><button id="dialer_btn" class="btn cbi-button" type="button">添加前置代理</button><button id="import_btn" class="btn cbi-button cbi-button-action" type="button">转换并添加节点</button><button id="clear_btn" class="btn cbi-button" type="button">清空</button></div><p id="dialer_hint" class="oce-muted">前置代理未启用；启用后固定添加 <code>dialer-proxy: 中转</code>。</p><p class="oce-muted">自动创建的槽位会先保存在浏览器草稿，预览并应用正式配置后生效。</p></div></div>
+    <div class="oce-grid"><div><label for="links"><strong>节点链接（每行一条）</strong></label><textarea id="links" class="oce-input oce-code" rows="10" placeholder="vless://...#节点名---H60 760 H75&#10;vmess://...&#10;hysteria2://...&#10;trojan://...&#10;trojan-go://...&#10;ss://...&#10;socks5://用户名:密码@IP:端口&#10;socks://Base64认证@IP:端口"></textarea></div><div><p><strong>支持协议：</strong>VLESS、VMess、Hysteria2/Hy2、Trojan/Trojan-Go、Shadowsocks/SS、SOCKS5</p><p class="oce-muted">可在节点末尾追加自定义口令，例如 <code>节点链接---H60 760 H75</code>，将为该节点创建 3 个口令槽位。</p><div class="oce-actions"><label class="oce-check-label"><input id="add_to_pr" class="oce-check" type="checkbox"> 自动将首个节点设为路由器代理节点</label><label class="oce-check-label"><input id="auto_create_slots" class="oce-check" type="checkbox" checked> 为本次转换的每个节点自动创建口令槽位</label></div><div class="oce-actions" style="margin-top:16px"><button id="dialer_btn" class="btn cbi-button" type="button">添加前置代理</button><button id="import_btn" class="btn cbi-button cbi-button-action" type="button">转换并添加节点</button><button id="clear_btn" class="btn cbi-button" type="button">清空</button></div><p id="dialer_hint" class="oce-muted">前置代理未启用；启用后固定添加 <code>dialer-proxy: 中转</code>。</p><p class="oce-muted">自动创建的槽位会先保存在浏览器草稿，预览并应用正式配置后生效。</p></div></div>
   </div>
 
   <div id="bulk_rename_modal" style="display:none;position:fixed;z-index:10000;inset:0;background:rgba(15,23,42,.55);align-items:center;justify-content:center;padding:20px">
@@ -31,8 +31,8 @@
     <div class="oce-actions" style="margin-top:14px"><a class="btn cbi-button cbi-button-action" href="<%=luci.dispatcher.build_url('admin','services','openclash','visual-editor-rules')%>">下一步：管理规则与应用 →</a></div>
   </div>
 </div>
-<script src="<%=resource%>/openclash-editor/converter.js?v=2.2.5"></script>
-<script src="<%=resource%>/openclash-editor/editor-common.js?v=2.2.5"></script>
+<script src="<%=resource%>/openclash-editor/converter.js?v=2.2.9"></script>
+<script src="<%=resource%>/openclash-editor/editor-common.js?v=2.2.9"></script>
 <script>
 (function(){
   var E=OpenClashEditor,draft,dialer=false,bulkRename={prefix:'',start:1,configured:false},selectedNodes=Object.create(null);
@@ -53,22 +53,27 @@
     var out=OpenClashConverter.convert(el('links').value,dialer?'中转':''),renameEnabled=el('bulk_rename_enabled').checked;
     if(renameEnabled&&out.nodes.length&&!bulkRename.configured){openBulkRename();msg('请先设置批量节点名称和起始数','warn');return}
     if(renameEnabled)E.numberNodes(out.nodes,bulkRename.prefix,bulkRename.start);
-    var accepted=[],skipped=[];
-    out.nodes.forEach(function(n){if(/[,\r\n]/.test(n.name))out.errors.push('节点名称不能包含逗号或换行：'+n.name);else if(exists(n.name)||accepted.some(function(x){return x.name===n.name}))skipped.push(n.name);else accepted.push(n)});
+    var accepted=[],skipped=[],slotCodesByName=Object.create(null);
+    out.nodes.forEach(function(n,index){if(/[,\r\n]/.test(n.name))out.errors.push('节点名称不能包含逗号或换行：'+n.name);else if(exists(n.name)||accepted.some(function(x){return x.name===n.name}))skipped.push(n.name);else{accepted.push(n);slotCodesByName[n.name]=(out.slot_codes&&out.slot_codes[index])||[]}});
     if(!accepted.length){msg(out.errors.concat(skipped.map(function(x){return'同名节点已存在：'+x})).join('\n')||'没有可添加的节点','error');return}
     var addFirstToRouter=el('add_to_pr').checked,autoSlots=el('auto_create_slots').checked,button=el('import_btn');
     accepted.forEach(function(n,index){draft.nodes.push({name:String(n.name),type:String(n.type||''),server:String(n.server||''),port:n.port,in_pr:addFirstToRouter&&index===0,data:n})});
     draft.selected_node_names=accepted.map(function(n){return n.name});
     if(addFirstToRouter)el('add_to_pr').checked=false;
     render();
+    var importedCodeCount=accepted.reduce(function(total,n){return total+(slotCodesByName[n.name]||[]).length},0);
     var notes=['已添加 '+accepted.length+' 个节点',addFirstToRouter?'首个节点已设为路由器代理节点':'未自动设置路由器代理节点'];
+    if(importedCodeCount)notes.push('检测到 '+importedCodeCount+' 个自定义口令');
     if(renameEnabled)notes.push('批量命名：'+accepted[0].name+(accepted.length>1?' ～ '+accepted[accepted.length-1].name:''));
     if(skipped.length)notes.push('跳过同名节点：'+skipped.join('、'));
     if(out.errors.length)notes.push(out.errors.join('\n'));
-    if(!autoSlots){notes.push('未自动创建扫码槽位');msg(notes.join('\n'),skipped.length||out.errors.length?'warn':'ok');return}
+    if(!autoSlots){notes.push(importedCodeCount?'未勾选自动创建口令槽位，自定义口令未导入':'未自动创建口令槽位');msg(notes.join('\n'),importedCodeCount||skipped.length||out.errors.length?'warn':'ok');return}
     button.disabled=true;
+    var slotRequests=[];
+    accepted.forEach(function(n){var codes=slotCodesByName[n.name]||[];if(codes.length)codes.forEach(function(code){slotRequests.push({node:n.name,code:code})});else slotRequests.push({node:n.name,code:''})});
     var payload={
       nodes:accepted.map(function(n){return n.name}),
+      slot_requests:slotRequests,
       available_nodes:draft.nodes.map(function(n){return n.name}),
       slots:draft.slots||[],
       used_ips:draft.rules.map(function(rule){return E.ruleParts(rule).ip})

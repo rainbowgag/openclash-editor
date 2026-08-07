@@ -871,7 +871,7 @@ def next_slot_name(node_name, slots)
   "#{prefix}#{numbers.empty? ? 1 : numbers.max + 1}"
 end
 
-def build_slots_for_nodes(node_names, slots, additional_ips = [], available_names = nil)
+def build_slots_for_nodes(node_names, slots, additional_ips = [], available_names = nil, requested_codes = nil)
   names = Array(node_names).map { |name| name.to_s.strip }
   raise "请至少选择一个节点" if names.empty?
   raise "单次最多为 256 个节点创建槽位" if names.length > 256
@@ -881,11 +881,30 @@ def build_slots_for_nodes(node_names, slots, additional_ips = [], available_name
   ips = slot_allocatable_ips(names.length, additional_ips)
   now = Time.now.to_i
   working = slots.map(&:dup)
+  normalize_slot_codes!(working)
+  raw_codes = requested_codes.nil? ? Array.new(names.length) : Array(requested_codes)
+  raise "节点数量与导入口令数量不一致" unless raw_codes.length == names.length
+  used_codes = working.each_with_object({}) { |slot, used| used[slot["code"].to_s] = true }
+  normalized_codes = raw_codes.map do |value|
+    next nil if value.to_s.strip.empty?
+    code = slot_code!(value)
+    raise "槽位口令已存在：#{code}" if used_codes[code]
+    used_codes[code] = true
+    code
+  end
+  next_number = used_codes.keys.filter_map { |code| code.to_i if code.match?(/\A\d+\z/) }.max.to_i + 1
   names.each_with_index.map do |node_name, index|
+    code = normalized_codes[index]
+    unless code
+      next_number += 1 while used_codes[format("%03d", next_number)]
+      code = format("%03d", next_number)
+      used_codes[code] = true
+      next_number += 1
+    end
     slot = {
       "id" => random_hex(6),
       "token" => random_hex(16),
-      "code" => next_slot_code(working),
+      "code" => code,
       "name" => next_slot_name(node_name, working),
       "ip" => ips[index],
       "node" => node_name,
@@ -1123,11 +1142,18 @@ end
 
 def slots_plan_response(request_path)
   request = YAML.safe_load(File.read(request_path), aliases: true) || {}
-  names = Array(request["nodes"]).map { |name| name.to_s.strip }
+  slot_requests = Array(request["slot_requests"]).select { |item| item.is_a?(Hash) }
+  if slot_requests.empty?
+    names = Array(request["nodes"]).map { |name| name.to_s.strip }
+    requested_codes = nil
+  else
+    names = slot_requests.map { |item| item["node"].to_s.strip }
+    requested_codes = slot_requests.map { |item| item["code"] }
+  end
   available_names = Array(request["available_nodes"]).map { |name| name.to_s.strip }
   draft_slots = Array(request["slots"]).select { |slot| slot.is_a?(Hash) }
   used_ips = Array(request["used_ips"])
-  created = build_slots_for_nodes(names, draft_slots, used_ips, available_names)
+  created = build_slots_for_nodes(names, draft_slots, used_ips, available_names, requested_codes)
   { "ok" => true, "created" => created, "created_count" => created.length }
 end
 

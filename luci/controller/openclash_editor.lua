@@ -143,11 +143,25 @@ function index()
 	entry({"oec"}, call("action_code_bind")).leaf = true
 end
 
-local function reply(ok, data)
-	data = data or {}
-	data.ok = ok
+local pending_reply
+local pending_page
+
+-- LuCI runs each request in a coroutine and http output may yield while
+-- flushing headers. Standard Lua 5.1 cannot yield across the xpcall C-call
+-- boundary, so reply() only records the response and flush_reply() writes it
+-- after xpcall has finished.
+local function flush_reply()
+	local pending = pending_reply
+	pending_reply = nil
+	if not pending then return end
+	local data = pending.data
+	data.ok = pending.ok
 	http.prepare_content("application/json")
 	http.write(json.stringify(data))
+end
+
+local function reply(ok, data)
+	pending_reply = { ok = ok, data = data or {} }
 end
 
 local function require_post()
@@ -181,13 +195,13 @@ end
 local function state_impl()
 	local result, err, details = run_backend("state")
 	if not result then return reply(false, { error = err, details = details }) end
-	http.prepare_content("application/json")
-	http.write(json.stringify(result))
+	reply(true, result)
 end
 
 function action_state()
 	local ok, err = xpcall(state_impl, debug.traceback)
 	if not ok then reply(false, { error = "读取配置失败", details = err }) end
+	flush_reply()
 end
 
 local function qr_create_impl()
@@ -202,9 +216,10 @@ local function qr_create_impl()
 end
 
 function action_qr_create()
-	if not require_post() then return end
+	if not require_post() then return flush_reply() end
 	local ok, err = xpcall(qr_create_impl, debug.traceback)
 	if not ok then reply(false, { error = "生成二维码失败", details = err }) end
+	flush_reply()
 end
 
 function action_qr_devices()
@@ -215,10 +230,10 @@ function action_qr_devices()
 		reply(true, result)
 	end, debug.traceback)
 	if not ok then reply(false, { error = "读取扫码设备失败", details = err }) end
+	flush_reply()
 end
 
 local function qr_device_action(command, require_node)
-	if not require_post() then return end
 	local mac = http.formvalue("mac") or ""
 	local node = http.formvalue("node") or ""
 	local reload_openclash = http.formvalue("reload") == "1" and "1" or "0"
@@ -236,18 +251,24 @@ local function qr_device_action(command, require_node)
 end
 
 function action_qr_change()
+	if not require_post() then return flush_reply() end
 	local ok, err = xpcall(function() qr_device_action("qr-device-change", true) end, debug.traceback)
 	if not ok then reply(false, { error = "更换代理失败", details = err }) end
+	flush_reply()
 end
 
 function action_qr_unproxy()
+	if not require_post() then return flush_reply() end
 	local ok, err = xpcall(function() qr_device_action("qr-device-unproxy", false) end, debug.traceback)
 	if not ok then reply(false, { error = "取消代理失败", details = err }) end
+	flush_reply()
 end
 
 function action_qr_delete()
+	if not require_post() then return flush_reply() end
 	local ok, err = xpcall(function() qr_device_action("qr-device-delete", false) end, debug.traceback)
 	if not ok then reply(false, { error = "删除扫码设备失败", details = err }) end
+	flush_reply()
 end
 
 local function qr_delete_bulk_impl()
@@ -272,9 +293,10 @@ local function qr_delete_bulk_impl()
 end
 
 function action_qr_delete_bulk()
-	if not require_post() then return end
+	if not require_post() then return flush_reply() end
 	local ok, err = xpcall(qr_delete_bulk_impl, debug.traceback)
 	if not ok then reply(false, { error = "批量删除扫码设备失败", details = err }) end
+	flush_reply()
 end
 
 function action_slots_list()
@@ -285,10 +307,11 @@ function action_slots_list()
 		reply(true, result)
 	end, debug.traceback)
 	if not ok then reply(false, { error = "读取扫码槽位失败", details = err }) end
+	flush_reply()
 end
 
 function action_slots_create()
-	if not require_post() then return end
+	if not require_post() then return flush_reply() end
 	local ok, err = xpcall(function()
 		local node = http.formvalue("node") or ""
 		local count = http.formvalue("count") or "1"
@@ -311,6 +334,7 @@ function action_slots_create()
 		reply(true, result)
 	end, debug.traceback)
 	if not ok then reply(false, { error = "创建扫码槽位失败", details = err }) end
+	flush_reply()
 end
 
 local function parse_name_list(raw)
@@ -323,7 +347,7 @@ local function parse_name_list(raw)
 end
 
 function action_slots_create_many()
-	if not require_post() then return end
+	if not require_post() then return flush_reply() end
 	local ok, err = xpcall(function()
 		local raw = http.formvalue("nodes") or ""
 		if type(raw) ~= "string" or #raw > 65535 then return reply(false, { error = "节点参数无效" }) end
@@ -336,10 +360,11 @@ function action_slots_create_many()
 		reply(true, result)
 	end, debug.traceback)
 	if not ok then reply(false, { error = "按节点批量创建扫码槽位失败", details = err }) end
+	flush_reply()
 end
 
 function action_slots_plan()
-	if not require_post() then return end
+	if not require_post() then return flush_reply() end
 	local ok, err = xpcall(function()
 		local payload = http.formvalue("payload") or ""
 		if type(payload) ~= "string" or #payload == 0 or #payload > 1048576 then
@@ -354,10 +379,10 @@ function action_slots_plan()
 		reply(true, result)
 	end, debug.traceback)
 	if not ok then reply(false, { error = "规划扫码槽位失败", details = err }) end
+	flush_reply()
 end
 
 local function slot_id_action(command, include_node)
-	if not require_post() then return end
 	local id = http.formvalue("id") or ""
 	local node = http.formvalue("node") or ""
 	if type(id) ~= "string" or not id:match("^[0-9a-f]+$") or #id ~= 12 then
@@ -375,12 +400,14 @@ local function slot_id_action(command, include_node)
 end
 
 function action_slot_update()
+	if not require_post() then return flush_reply() end
 	local ok, err = xpcall(function() slot_id_action("slot-update", true) end, debug.traceback)
 	if not ok then reply(false, { error = "修改扫码槽位失败", details = err }) end
+	flush_reply()
 end
 
 function action_slot_code_update()
-	if not require_post() then return end
+	if not require_post() then return flush_reply() end
 	local ok, err = xpcall(function()
 		local id = http.formvalue("id") or ""
 		local code = http.formvalue("code") or ""
@@ -396,15 +423,18 @@ function action_slot_code_update()
 		reply(true, result)
 	end, debug.traceback)
 	if not ok then reply(false, { error = "修改槽位口令失败", details = err }) end
+	flush_reply()
 end
 
 function action_slot_regenerate()
+	if not require_post() then return flush_reply() end
 	local ok, err = xpcall(function() slot_id_action("slot-regenerate", false) end, debug.traceback)
 	if not ok then reply(false, { error = "重置扫码槽位二维码失败", details = err }) end
+	flush_reply()
 end
 
 function action_slot_rebind()
-	if not require_post() then return end
+	if not require_post() then return flush_reply() end
 	local ok, err = xpcall(function()
 		local id = http.formvalue("id") or ""
 		local enabled = http.formvalue("enabled") or ""
@@ -420,20 +450,25 @@ function action_slot_rebind()
 		reply(true, result)
 	end, debug.traceback)
 	if not ok then reply(false, { error = "修改换绑授权失败", details = err }) end
+	flush_reply()
 end
 
 function action_slot_refresh_lease()
+	if not require_post() then return flush_reply() end
 	local ok, err = xpcall(function() slot_id_action("slot-refresh-lease", false) end, debug.traceback)
 	if not ok then reply(false, { error = "刷新扫码槽位 IP 租约失败", details = err }) end
+	flush_reply()
 end
 
 function action_slot_delete()
+	if not require_post() then return flush_reply() end
 	local ok, err = xpcall(function() slot_id_action("slot-delete", false) end, debug.traceback)
 	if not ok then reply(false, { error = "删除扫码槽位失败", details = err }) end
+	flush_reply()
 end
 
 function action_slots_delete()
-	if not require_post() then return end
+	if not require_post() then return flush_reply() end
 	local ok, err = xpcall(function()
 		local raw = http.formvalue("ids") or ""
 		if type(raw) ~= "string" or #raw > 8192 then return reply(false, { error = "批量删除参数无效" }) end
@@ -446,16 +481,24 @@ function action_slots_delete()
 		reply(true, result)
 	end, debug.traceback)
 	if not ok then reply(false, { error = "批量删除扫码槽位失败", details = err }) end
+	flush_reply()
 end
 
 local function qr_bind_page(title, body, tone)
-	local color = tone == "ok" and "#08783e" or tone == "warn" and "#9a5a00" or "#b42318"
+	pending_page = { title = title, body = body, tone = tone }
+end
+
+local function flush_page()
+	local pending = pending_page
+	pending_page = nil
+	if not pending then return end
+	local color = pending.tone == "ok" and "#08783e" or pending.tone == "warn" and "#9a5a00" or "#b42318"
 	http.prepare_content("text/html; charset=utf-8")
 	http.write("<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">")
 	http.write("<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">")
-	http.write("<title>" .. pcdata(title) .. "</title>")
+	http.write("<title>" .. pcdata(pending.title) .. "</title>")
 	http.write("<style>body{margin:0;background:#f4f7fb;color:#15254b;font:16px/1.65 sans-serif}.box{max-width:560px;margin:9vh auto;padding:28px;background:#fff;border-radius:18px;box-shadow:0 12px 40px #15254b22}.state{border-left:6px solid " .. color .. ";padding-left:18px}h1{font-size:26px;margin:0 0 16px}.input{display:block;width:100%;box-sizing:border-box;margin-top:16px;padding:15px;border:2px solid #9bbcff;border-radius:10px;background:#fff;color:#15254b;font-size:28px;font-weight:800;text-align:center;letter-spacing:.28em}.btn{display:block;width:100%;box-sizing:border-box;margin-top:18px;padding:15px;border:0;border-radius:10px;background:#2867e8;color:#fff;font-weight:700;font-size:17px}code{word-break:break-all}.hint{color:#65748d;font-size:14px}</style>")
-	http.write("</head><body><main class=\"box\"><div class=\"state\"><h1>" .. pcdata(title) .. "</h1>" .. body .. "</div></main></body></html>")
+	http.write("</head><body><main class=\"box\"><div class=\"state\"><h1>" .. pcdata(pending.title) .. "</h1>" .. pending.body .. "</div></main></body></html>")
 end
 
 local function qr_bind_impl()
@@ -529,6 +572,7 @@ end
 function action_qr_bind()
 	local ok, err = xpcall(qr_bind_impl, debug.traceback)
 	if not ok then qr_bind_page("绑定失败", "<p>" .. pcdata(err) .. "</p>", "error") end
+	flush_page()
 end
 
 local function code_bind_form(error_message)
@@ -570,6 +614,7 @@ end
 function action_code_bind()
 	local ok, err = xpcall(code_bind_impl, debug.traceback)
 	if not ok then code_bind_form(err) end
+	flush_page()
 end
 
 local function preview_impl()
@@ -600,9 +645,10 @@ local function preview_impl()
 end
 
 function action_preview()
-	if not require_post() then return end
+	if not require_post() then return flush_reply() end
 	local ok, err = xpcall(preview_impl, debug.traceback)
 	if not ok then reply(false, { error = "后端执行异常", details = err }) end
+	flush_reply()
 end
 
 local function apply_impl()
@@ -661,13 +707,14 @@ local function apply_impl()
 end
 
 function action_apply()
-	if not require_post() then return end
+	if not require_post() then return flush_reply() end
 	local ok, err = xpcall(apply_impl, debug.traceback)
 	if not ok then reply(false, { error = "后端执行异常", details = err }) end
+	flush_reply()
 end
 
 function action_restart()
-	if not require_post() then return end
+	if not require_post() then return flush_reply() end
 	local ok, err = xpcall(function()
 		local repair_result, repair_error, repair_details = run_backend("slots-repair")
 		if not repair_result then
@@ -683,6 +730,7 @@ function action_restart()
 		})
 	end, debug.traceback)
 	if not ok then reply(false, { error = "重启 OpenClash 失败", details = err }) end
+	flush_reply()
 end
 
 local function reset_impl()
@@ -695,9 +743,10 @@ local function reset_impl()
 end
 
 function action_reset()
-	if not require_post() then return end
+	if not require_post() then return flush_reply() end
 	local ok, err = xpcall(reset_impl, debug.traceback)
 	if not ok then reply(false, { error = "恢复初始配置失败", details = err }) end
+	flush_reply()
 end
 
 local function version_is_newer(latest, current)
@@ -717,7 +766,10 @@ end
 function action_update_check()
 	local current = (fs.readfile(version_path) or "dev"):gsub("%s+$", "")
 	local latest = sys.exec("sh " .. shellquote(update_path) .. " check 2>/dev/null"):gsub("%s+$", "")
-	if latest == "" then return reply(false, { error = "无法连接 GitHub 检查版本", current = current }) end
+	if latest == "" then
+		reply(false, { error = "无法连接 GitHub 检查版本", current = current })
+		return flush_reply()
+	end
 	local required = {
 		"/usr/share/openclash-editor/portal-watch.sh",
 		"/etc/init.d/openclash-editor-portal",
@@ -734,14 +786,19 @@ function action_update_check()
 		repair = #missing > 0,
 		missing = missing
 	})
+	flush_reply()
 end
 
 function action_update()
-	if not require_post() then return end
+	if not require_post() then return flush_reply() end
 	local log_path = "/tmp/openclash-editor-update.log"
 	local status = sys.call("sh " .. shellquote(update_path) .. " update >" .. shellquote(log_path) .. " 2>&1")
 	local output = fs.readfile(log_path) or ""
-	if status ~= 0 then return reply(false, { error = "更新失败", details = output }) end
+	if status ~= 0 then
+		reply(false, { error = "更新失败", details = output })
+		return flush_reply()
+	end
 	local version = (fs.readfile(version_path) or "unknown"):gsub("%s+$", "")
 	reply(true, { message = "更新成功", version = version, details = output })
+	flush_reply()
 end

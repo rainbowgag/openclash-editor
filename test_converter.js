@@ -62,6 +62,17 @@ ssResult.nodes.forEach((item, index) => {
 });
 console.log(JSON.stringify(ssResult.nodes));
 
+const codedLink = 'vless://65fc6b2e-cba5-4fae-a4f4-3a0cf93fdde7@mc.huojianip.com:38145?encryption=none&flow=xtls-rprx-vision&security=reality&sni=www.cloudflare.com&fp=chrome&pbk=tHf5OOQjbRGSV0E8Bpdd8QE418zuk0o_SNRiGTpmF18&sid=d7c69f7c&type=tcp&headerType=none#%E9%9F%A9%E5%9B%BD-203.173.106.145---H60 760 H75';
+const codedResult = OpenClashConverter.convert(codedLink, '');
+if (codedResult.errors.length) throw new Error(codedResult.errors.join('\n'));
+if (codedResult.nodes.length !== 1 || codedResult.nodes[0].name !== '韩国-203.173.106.145') throw new Error('custom slot codes changed the node name');
+if (JSON.stringify(codedResult.slot_codes[0]) !== JSON.stringify(['H60', '760', 'H75'])) throw new Error(`custom slot code parsing failed: ${JSON.stringify(codedResult.slot_codes)}`);
+const duplicateCodes = OpenClashConverter.convert(codedLink.replace('H60 760 H75', '1 001'), '');
+if (!duplicateCodes.errors.some(error => error.includes('口令重复：001'))) throw new Error('normalized duplicate slot codes were not rejected');
+const invalidCode = OpenClashConverter.convert(codedLink.replace('H60 760 H75', 'BAD-CODE'), '');
+if (!invalidCode.errors.some(error => error.includes('1 至 12 位字母或数字'))) throw new Error('invalid custom slot code was not rejected');
+console.log(JSON.stringify({name:codedResult.nodes[0].name,codes:codedResult.slot_codes[0]}));
+
 const numbered = Array.from({length: 10}, (_, index) => ({name: `old-${index + 1}`}));
 OpenClashEditor.numberNodes(numbered, '美国', 5);
 if (numbered[0].name !== '美国5' || numbered[9].name !== '美国14') throw new Error('bulk node numbering failed');
