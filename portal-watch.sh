@@ -4,12 +4,20 @@ SLOT_STATE="${OPENCLASH_EDITOR_SLOT_STATE:-/etc/openclash/openclash-editor-slots
 NFT_TABLE="${OPENCLASH_EDITOR_PORTAL_NFT_TABLE:-openclash_editor_portal}"
 POLL_SECONDS="${OPENCLASH_EDITOR_PORTAL_POLL_SECONDS:-3}"
 PROBE_MARKER="OPENCLASH_EDITOR_PORTAL"
-BACKUP_DIR="/usr/share/openclash-editor/portal-backups"
-NGINX_LOCATIONS="/etc/nginx/conf.d/openclash-editor-portal.locations"
-PROBE_PATHS="hotspot-detect.html library/test/success.html generate_204 gen_204 connecttest.txt redirect canonical.html success.txt ncsi.txt"
+SHORTCUT_MARKER="OPENCLASH_EDITOR_BIND_LAN"
+SHORT_HOST="${OPENCLASH_EDITOR_SHORT_HOST:-bind.lan}"
+WEB_ROOT="${OPENCLASH_EDITOR_WEB_ROOT:-/www}"
+HOSTS_FILE="${OPENCLASH_EDITOR_HOSTS_FILE:-/etc/hosts}"
+BACKUP_DIR="${OPENCLASH_EDITOR_PORTAL_BACKUP_DIR:-/usr/share/openclash-editor/portal-backups}"
+NGINX_CONF_DIR="${OPENCLASH_EDITOR_NGINX_CONF_DIR:-/etc/nginx/conf.d}"
+NGINX_LOCATIONS="$NGINX_CONF_DIR/openclash-editor-portal.locations"
+INDEX_PATH="$WEB_ROOT/index.html"
+INDEX_BACKUP="$BACKUP_DIR/index.html.bind-lan-original"
+PROBE_PATHS="hotspot-detect.html library/test/success.html generate_204 gen_204 connecttest.txt redirect canonical.html success.txt ncsi.txt oec"
 
 detect_lan_ip() {
-  address="$(uci -q get network.lan.ipaddr 2>/dev/null || true)"
+  address="${OPENCLASH_EDITOR_LAN_IP:-}"
+  [ -n "$address" ] || address="$(uci -q get network.lan.ipaddr 2>/dev/null || true)"
   address="${address%%/*}"
   case "$address" in
     ''|*[!0-9.]*) address="" ;;
@@ -18,9 +26,73 @@ detect_lan_ip() {
   printf '%s\n' "$address"
 }
 
+reload_local_dns() {
+  [ "${OPENCLASH_EDITOR_SKIP_DNS_RELOAD:-0}" != "1" ] || return 0
+  if [ -x /etc/init.d/dnsmasq ]; then
+    /etc/init.d/dnsmasq reload >/dev/null 2>&1 || killall -HUP dnsmasq >/dev/null 2>&1 || true
+  else
+    killall -HUP dnsmasq >/dev/null 2>&1 || true
+  fi
+}
+
+write_shortcuts() {
+  lan_ip="$1"
+  [ -n "$lan_ip" ] || return 1
+  mkdir -p "$(dirname "$HOSTS_FILE")" "$BACKUP_DIR" "$WEB_ROOT"
+  [ -f "$HOSTS_FILE" ] || : > "$HOSTS_FILE"
+
+  hosts_temporary="${HOSTS_FILE}.openclash-editor.$$"
+  awk -v marker="$SHORTCUT_MARKER" 'index($0, marker) == 0 { print }' "$HOSTS_FILE" > "$hosts_temporary"
+  printf '%s %s # %s\n' "$lan_ip" "$SHORT_HOST" "$SHORTCUT_MARKER" >> "$hosts_temporary"
+  if cmp -s "$hosts_temporary" "$HOSTS_FILE"; then
+    rm -f "$hosts_temporary"
+  else
+    cat "$hosts_temporary" > "$HOSTS_FILE"
+    rm -f "$hosts_temporary"
+    reload_local_dns
+  fi
+
+  if [ -f "$INDEX_PATH" ] && ! grep -q "$SHORTCUT_MARKER" "$INDEX_PATH" 2>/dev/null; then
+    [ -f "$INDEX_BACKUP" ] || cp -p "$INDEX_PATH" "$INDEX_BACKUP"
+  fi
+  if [ -f "$INDEX_BACKUP" ]; then
+    index_temporary="${INDEX_PATH}.openclash-editor.$$"
+    {
+      printf '<script>/* %s */if((location.hostname||"").toLowerCase()==="%s"){location.replace("/cgi-bin/luci/oec");}</script>\n' "$SHORTCUT_MARKER" "$SHORT_HOST"
+      cat "$INDEX_BACKUP"
+    } > "$index_temporary"
+    cat "$index_temporary" > "$INDEX_PATH"
+    rm -f "$index_temporary"
+  elif [ ! -f "$INDEX_PATH" ]; then
+    cat > "$INDEX_PATH" <<EOF
+<!doctype html><!-- $SHORTCUT_MARKER --><meta charset="utf-8"><script>if((location.hostname||"").toLowerCase()==="$SHORT_HOST"){location.replace("/cgi-bin/luci/oec");}else{location.replace("/cgi-bin/luci/");}</script>
+EOF
+    chmod 644 "$INDEX_PATH"
+  fi
+}
+
+restore_shortcuts() {
+  if [ -f "$HOSTS_FILE" ]; then
+    hosts_temporary="${HOSTS_FILE}.openclash-editor.$$"
+    awk -v marker="$SHORTCUT_MARKER" 'index($0, marker) == 0 { print }' "$HOSTS_FILE" > "$hosts_temporary"
+    if ! cmp -s "$hosts_temporary" "$HOSTS_FILE"; then
+      cat "$hosts_temporary" > "$HOSTS_FILE"
+      reload_local_dns
+    fi
+    rm -f "$hosts_temporary"
+  fi
+
+  if [ -f "$INDEX_BACKUP" ]; then
+    cat "$INDEX_BACKUP" > "$INDEX_PATH"
+    rm -f "$INDEX_BACKUP"
+  elif [ -f "$INDEX_PATH" ] && grep -q "$SHORTCUT_MARKER" "$INDEX_PATH" 2>/dev/null; then
+    rm -f "$INDEX_PATH"
+  fi
+}
+
 backup_probe() {
   path="$1"
-  relative="${path#/www/}"
+  relative="${path#"$WEB_ROOT"/}"
   backup="$BACKUP_DIR/$relative"
   [ ! -f "$path" ] || grep -q "$PROBE_MARKER" "$path" 2>/dev/null || {
     mkdir -p "$(dirname "$backup")"
@@ -32,8 +104,9 @@ write_probe_files() {
   lan_ip="$(detect_lan_ip)"
   [ -n "$lan_ip" ] || return 1
   mkdir -p "$BACKUP_DIR"
+  write_shortcuts "$lan_ip"
   for relative in $PROBE_PATHS; do
-    path="/www/$relative"
+    path="$WEB_ROOT/$relative"
     backup_probe "$path"
     mkdir -p "$(dirname "$path")"
     cat > "$path" <<EOF
@@ -42,9 +115,11 @@ EOF
     chmod 644 "$path"
   done
 
-  if [ -d /etc/nginx/conf.d ] && [ -x /etc/init.d/nginx ]; then
+  if [ -d "$NGINX_CONF_DIR" ] && [ -x /etc/init.d/nginx ]; then
     cat > "$NGINX_LOCATIONS" <<EOF
 # $PROBE_MARKER
+if (\$host = $SHORT_HOST) { return 302 http://$lan_ip/cgi-bin/luci/oec; }
+location = /oec { return 302 http://$lan_ip/cgi-bin/luci/oec; }
 location = /hotspot-detect.html { return 302 http://$lan_ip/cgi-bin/luci/oec; }
 location = /library/test/success.html { return 302 http://$lan_ip/cgi-bin/luci/oec; }
 location = /generate_204 { return 302 http://$lan_ip/cgi-bin/luci/oec; }
@@ -66,7 +141,7 @@ EOF
 restore_probe_files() {
   rm -f "$NGINX_LOCATIONS"
   for relative in $PROBE_PATHS; do
-    path="/www/$relative"
+    path="$WEB_ROOT/$relative"
     backup="$BACKUP_DIR/$relative"
     if [ -f "$backup" ]; then
       mkdir -p "$(dirname "$path")"
@@ -75,6 +150,7 @@ restore_probe_files() {
       rm -f "$path"
     fi
   done
+  restore_shortcuts
   rm -rf "$BACKUP_DIR"
   [ ! -x /etc/init.d/nginx ] || /etc/init.d/nginx reload >/dev/null 2>&1 || true
 }
@@ -160,6 +236,7 @@ collect_pending_macs() {
 }
 
 cleanup_firewall() {
+  [ "${OPENCLASH_EDITOR_SKIP_FIREWALL_CLEANUP:-0}" != "1" ] || return 0
   command -v nft >/dev/null 2>&1 && nft delete table inet "$NFT_TABLE" >/dev/null 2>&1 || true
   if command -v iptables >/dev/null 2>&1; then
     while iptables -t nat -C PREROUTING -j OCE_PORTAL >/dev/null 2>&1; do iptables -t nat -D PREROUTING -j OCE_PORTAL; done

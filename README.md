@@ -148,7 +148,7 @@ sh -c "$(wget -qO- https://raw.githubusercontent.com/rainbowgag/openclash-editor
 
 应用正式配置后会延迟启动 OpenClash 后台重启任务，使新规则生效并确保页面先收到成功响应。
 
-口令槽位的创建、修改和删除会在正式配置旁创建 `.配置文件名.qr-backup-YYYYMMDD-HHMMSS` 备份。口令入口只接受当前 LAN 网段的访问。
+口令槽位的创建、修改和删除会在正式配置旁创建 `.配置文件名.qr-backup-YYYYMMDD-HHMMSS` 备份。口令入口只接受当前 LAN 网段的访问。口令版安装后可通过局域网短地址 `http://bind.lan` 手动打开绑定页，也可使用备用地址 `http://路由器IP/oec`；LAN 地址变化后会自动更新本地解析。
 
 口令槽位数据保存在 `/etc/openclash/openclash-editor-slots.json`（权限 `600`）。创建槽位时会预写规则；手机输入口令换绑通常只修改 DHCP 的 MAC，不重复改写 YAML。口令仅应分配给对应设备使用；同一口令再次绑定时，后一个设备会替换前一个设备。卸载插件时会保留槽位数据、DHCP 固定租约和正式配置，避免卸载操作意外影响现有设备网络。
 

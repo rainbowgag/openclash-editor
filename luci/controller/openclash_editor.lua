@@ -2,12 +2,54 @@ module("luci.controller.openclash_editor", package.seeall)
 
 local http = require "luci.http"
 local json = require "luci.jsonc"
-local fs = require "nixio.fs"
 local sys = require "luci.sys"
 local util = require "luci.util"
 local uci_model = require "luci.model.uci"
 local xml_ok, xml = pcall(require, "luci.xml")
 local pcdata = xml_ok and xml.pcdata or util.pcdata
+
+local function load_filesystem_module()
+	local ok, module = pcall(require, "nixio.fs")
+	if ok and type(module) == "table" then return module end
+	module = package.loaded["nixio.fs"]
+	if type(module) == "table" then return module end
+	if type(nixio) == "table" and type(nixio.fs) == "table" then return nixio.fs end
+	ok, module = pcall(require, "luci.fs")
+	if ok and type(module) == "table" then return module end
+	module = package.loaded["luci.fs"]
+	if type(module) == "table" then return module end
+	if type(luci) == "table" and type(luci.fs) == "table" then return luci.fs end
+
+	-- Minimal compatibility layer for legacy LuCI loaders that execute modules
+	-- without returning their module table from require().
+	return {
+		access = function(path)
+			local file = io.open(path, "rb")
+			if not file then return false end
+			file:close()
+			return true
+		end,
+		readfile = function(path)
+			local file = io.open(path, "rb")
+			if not file then return nil end
+			local content = file:read("*a")
+			file:close()
+			return content
+		end,
+		writefile = function(path, content)
+			local file = io.open(path, "wb")
+			if not file then return nil end
+			file:write(content or "")
+			file:close()
+			return true
+		end,
+		remove = function(path)
+			return os.remove(path)
+		end
+	}
+end
+
+local fs = load_filesystem_module()
 
 local test_path = "/tmp/openclash-editor-preview.yaml"
 local request_path = "/tmp/openclash-editor-request.json"

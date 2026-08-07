@@ -120,5 +120,6 @@ rm -f /tmp/luci-modulecache/* 2>/dev/null || true
 
 echo "安装成功！"
 echo "未绑定设备连接网络后会自动弹出口令绑定页；槽位口令从 001 开始。"
+echo "手动口令入口：http://bind.lan（备用：http://路由器IP/oec）"
 echo "请刷新 LuCI，然后进入：服务 -> OpenClash -> Visual Editor"
 echo "页面地址：http://路由器IP/cgi-bin/luci/admin/services/openclash/visual-editor"
