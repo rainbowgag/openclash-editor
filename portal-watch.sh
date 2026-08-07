@@ -13,6 +13,7 @@ NGINX_CONF_DIR="${OPENCLASH_EDITOR_NGINX_CONF_DIR:-/etc/nginx/conf.d}"
 NGINX_LOCATIONS="$NGINX_CONF_DIR/openclash-editor-portal.locations"
 INDEX_PATH="$WEB_ROOT/index.html"
 INDEX_BACKUP="$BACKUP_DIR/index.html.bind-lan-original"
+UHTTPD_INDEX_BACKUP="$BACKUP_DIR/uhttpd-index-page-original"
 PROBE_PATHS="hotspot-detect.html library/test/success.html generate_204 gen_204 connecttest.txt redirect canonical.html success.txt ncsi.txt oec"
 
 detect_lan_ip() {
@@ -33,6 +34,47 @@ reload_local_dns() {
   else
     killall -HUP dnsmasq >/dev/null 2>&1 || true
   fi
+}
+
+schedule_uhttpd_restart() {
+  [ "${OPENCLASH_EDITOR_SKIP_UHTTPD_CONFIG:-0}" != "1" ] || return 0
+  [ -x /etc/init.d/uhttpd ] || return 0
+  (sleep 5; /etc/init.d/uhttpd restart) >/tmp/openclash-editor-uhttpd-restart.log 2>&1 &
+}
+
+configure_uhttpd_index() {
+  [ "${OPENCLASH_EDITOR_SKIP_UHTTPD_CONFIG:-0}" != "1" ] || return 0
+  command -v uci >/dev/null 2>&1 || return 0
+  [ -x /etc/init.d/uhttpd ] || return 0
+  uci -q get uhttpd.main.home >/dev/null 2>&1 || return 0
+
+  current="$(uci -q get uhttpd.main.index_page 2>/dev/null || true)"
+  if [ ! -f "$UHTTPD_INDEX_BACKUP" ]; then
+    [ -n "$current" ] && printf '%s\n' "$current" > "$UHTTPD_INDEX_BACKUP" || printf '%s\n' "__OCE_UNSET__" > "$UHTTPD_INDEX_BACKUP"
+    chmod 600 "$UHTTPD_INDEX_BACKUP"
+  fi
+  [ "$current" != "index.html" ] || return 0
+  uci set uhttpd.main.index_page='index.html'
+  uci commit uhttpd
+  schedule_uhttpd_restart
+}
+
+restore_uhttpd_index() {
+  [ -f "$UHTTPD_INDEX_BACKUP" ] || return 0
+  if [ "${OPENCLASH_EDITOR_SKIP_UHTTPD_CONFIG:-0}" = "1" ]; then
+    rm -f "$UHTTPD_INDEX_BACKUP"
+    return 0
+  fi
+  command -v uci >/dev/null 2>&1 || return 0
+  original="$(sed -n '1p' "$UHTTPD_INDEX_BACKUP")"
+  if [ "$original" = "__OCE_UNSET__" ]; then
+    uci -q delete uhttpd.main.index_page || true
+  else
+    uci set "uhttpd.main.index_page=$original"
+  fi
+  uci commit uhttpd
+  rm -f "$UHTTPD_INDEX_BACKUP"
+  schedule_uhttpd_restart
 }
 
 write_shortcuts() {
@@ -69,6 +111,7 @@ write_shortcuts() {
 EOF
     chmod 644 "$INDEX_PATH"
   fi
+  configure_uhttpd_index
 }
 
 restore_shortcuts() {
@@ -88,6 +131,7 @@ restore_shortcuts() {
   elif [ -f "$INDEX_PATH" ] && grep -q "$SHORTCUT_MARKER" "$INDEX_PATH" 2>/dev/null; then
     rm -f "$INDEX_PATH"
   fi
+  restore_uhttpd_index
 }
 
 backup_probe() {
