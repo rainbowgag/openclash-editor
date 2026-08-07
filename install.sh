@@ -109,6 +109,7 @@ lua /usr/lib/lua/luci/controller/openclash_editor.lua >/dev/null
 
 /etc/init.d/openclash-editor-portal enable
 /etc/init.d/openclash-editor-portal restart
+/usr/share/openclash-editor/portal-watch.sh setup
 
 # Publish the new version only after all required files are downloaded,
 # validated and the portal service has started successfully.

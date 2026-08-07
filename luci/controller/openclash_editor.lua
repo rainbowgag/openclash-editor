@@ -90,7 +90,21 @@ local function schedule_openclash_restart()
 end
 
 function index()
-	if not fs.access(get_source_path()) then return end
+	-- Legacy LuCI versions may cache and execute index() without preserving
+	-- chunk upvalues. Keep menu discovery self-contained instead of referencing
+	-- the controller-local fs/get_source_path values here.
+	local cursor = require("luci.model.uci").cursor()
+	local source_path = cursor:get("openclash", "config", "config_path")
+	if not source_path or source_path == "" then source_path = "/etc/openclash/config/config.yaml" end
+	local readable = false
+	local ok, filesystem = pcall(require, "nixio.fs")
+	if ok and type(filesystem) == "table" and type(filesystem.access) == "function" then
+		readable = filesystem.access(source_path) and true or false
+	else
+		local file = io.open(source_path, "rb")
+		if file then file:close(); readable = true end
+	end
+	if not readable then return end
 	local page = entry({"admin", "services", "openclash", "visual-editor"},
 		template("openclash_editor/nodes"), _("Node Editor"), 85)
 	page.leaf = true
