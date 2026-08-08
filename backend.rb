@@ -1318,6 +1318,36 @@ def slot_delete_response(id)
   end
 end
 
+def slot_unbind_response(id)
+  with_slot_lock do
+    slots = read_slots
+    slot = slot_by_id!(slots, id)
+    mac = slot["mac"].to_s.downcase
+    raise "该扫码槽位还没有绑定设备" if mac.empty?
+
+    section = "oce_slot_#{slot['id']}"
+    changed = false
+    if dhcp_host_sections.key?(section)
+      unless system("uci", "-q", "delete", "dhcp.#{section}") && system("uci", "commit", "dhcp")
+        system("uci", "revert", "dhcp")
+        raise "删除槽位的 DHCP 固定租约失败"
+      end
+      changed = true
+    end
+    changed = true if purge_dhcp_lease(mac).positive?
+    system("/etc/init.d/dnsmasq", "reload") if changed
+
+    slot["mac"] = ""
+    slot["device_name"] = ""
+    slot["updated_at"] = Time.now.to_i
+    slot["last_bound_at"] = 0
+    slot["rebind_until"] = 0
+    write_slots(slots)
+    schedule_wifi_reconnect(mac)
+    { "ok" => true, "slot" => slot, "unbound_mac" => mac, "reload_openclash" => false }
+  end
+end
+
 def slots_delete_response(id_list)
   with_slot_lock do
     ids = id_list.to_s.split(",").map(&:strip).reject(&:empty?).uniq
@@ -1940,6 +1970,7 @@ if __FILE__ == $PROGRAM_NAME
              when "slot-rebind" then slot_rebind_response(ARGV.fetch(1), ARGV.fetch(2))
              when "slot-refresh-lease" then slot_refresh_lease_response(ARGV.fetch(1))
              when "slot-delete" then slot_delete_response(ARGV.fetch(1))
+             when "slot-unbind" then slot_unbind_response(ARGV.fetch(1))
              when "slots-delete" then slots_delete_response(ARGV.fetch(1))
              else raise "未知操作"
              end

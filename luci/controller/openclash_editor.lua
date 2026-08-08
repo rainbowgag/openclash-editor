@@ -136,6 +136,7 @@ function index()
 	entry({"admin", "services", "openclash", "visual-editor-slot-rebind"}, call("action_slot_rebind")).leaf = true
 	entry({"admin", "services", "openclash", "visual-editor-slot-refresh-lease"}, call("action_slot_refresh_lease")).leaf = true
 	entry({"admin", "services", "openclash", "visual-editor-slot-delete"}, call("action_slot_delete")).leaf = true
+	entry({"admin", "services", "openclash", "visual-editor-slot-unbind"}, call("action_slot_unbind")).leaf = true
 	entry({"admin", "services", "openclash", "visual-editor-slots-delete"}, call("action_slots_delete")).leaf = true
 	entry({"openclash-editor-bind"}, call("action_qr_bind")).leaf = true
 	entry({"oeb"}, call("action_qr_bind")).leaf = true
@@ -467,6 +468,13 @@ function action_slot_delete()
 	flush_reply()
 end
 
+function action_slot_unbind()
+	if not require_post() then return flush_reply() end
+	local ok, err = xpcall(function() slot_id_action("slot-unbind", false) end, debug.traceback)
+	if not ok then reply(false, { error = "解绑扫码槽位设备失败", details = err }) end
+	flush_reply()
+end
+
 function action_slots_delete()
 	if not require_post() then return flush_reply() end
 	local ok, err = xpcall(function()
@@ -497,7 +505,7 @@ local function flush_page()
 	http.write("<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">")
 	http.write("<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">")
 	http.write("<title>" .. pcdata(pending.title) .. "</title>")
-	http.write("<style>body{margin:0;background:#f4f7fb;color:#15254b;font:16px/1.65 sans-serif}.box{max-width:560px;margin:9vh auto;padding:28px;background:#fff;border-radius:18px;box-shadow:0 12px 40px #15254b22}.state{border-left:6px solid " .. color .. ";padding-left:18px}h1{font-size:26px;margin:0 0 16px}.input{display:block;width:100%;box-sizing:border-box;margin-top:16px;padding:15px;border:2px solid #9bbcff;border-radius:10px;background:#fff;color:#15254b;font-size:28px;font-weight:800;text-align:center;letter-spacing:.28em}.btn{display:block;width:100%;box-sizing:border-box;margin-top:18px;padding:15px;border:0;border-radius:10px;background:#2867e8;color:#fff;font-weight:700;font-size:17px}code{word-break:break-all}.hint{color:#65748d;font-size:14px}</style>")
+	http.write("<style>body{margin:0;background:#f4f7fb;color:#15254b;font:16px/1.65 sans-serif}.box{max-width:560px;margin:9vh auto;padding:28px;background:#fff;border-radius:18px;box-shadow:0 12px 40px #15254b22}.state{border-left:6px solid " .. color .. ";padding-left:18px}h1{font-size:26px;margin:0 0 16px}.input{display:block;width:100%;box-sizing:border-box;margin-top:16px;padding:15px;border:2px solid #9bbcff;border-radius:10px;background:#fff;color:#15254b;font-size:28px;font-weight:800;text-align:center;letter-spacing:.28em}.btn{display:block;width:100%;box-sizing:border-box;margin-top:18px;padding:15px;border:0;border-radius:10px;background:#2867e8;color:#fff;font-weight:700;font-size:17px}.link{display:inline-block;margin-top:16px;color:#2867e8;font-weight:700;text-decoration:none}code{word-break:break-all}.hint{color:#65748d;font-size:14px}</style>")
 	http.write("</head><body><main class=\"box\"><div class=\"state\"><h1>" .. pcdata(pending.title) .. "</h1>" .. pending.body .. "</div></main></body></html>")
 end
 
@@ -583,7 +591,8 @@ local function code_bind_form(error_message)
 		"<form method=\"post\" action=\"\">" ..
 		"<input class=\"input\" name=\"code\" type=\"text\" inputmode=\"text\" pattern=\"[A-Za-z0-9]*\" maxlength=\"12\" autocapitalize=\"characters\" autocomplete=\"one-time-code\" autofocus placeholder=\"001 或 H377\">" ..
 		"<button class=\"btn\" type=\"submit\">绑定并连接网络</button></form>" ..
-		"<p class=\"hint\">绑定会让当前手机替换该槽位原来的设备，并自动获取槽位固定 IP。请勿把口令交给其他设备使用。</p>"
+		"<p class=\"hint\">绑定会让当前手机替换该槽位原来的设备，并自动获取槽位固定 IP。请勿把口令交给其他设备使用。</p>" ..
+		"<p class=\"hint\">如果刚才连错了口令，直接输入其他槽位口令提交即可更换，无需后台解绑。</p>"
 	qr_bind_page("设备口令绑定", body, error_message and "error" or "warn")
 end
 
@@ -607,7 +616,9 @@ local function code_bind_impl()
 	local body = "<p>当前设备已经绑定到槽位 <strong>" .. pcdata(slot.code or code) .. "</strong>。</p>" ..
 		"<p>代理节点：<strong>" .. pcdata(slot.node or "") .. "</strong></p>" ..
 		"<p>固定 IP：<strong>" .. pcdata(result.ip or slot.ip or "") .. "</strong></p>" ..
-		"<p><strong>路由器会让手机自动重新连接 Wi-Fi。</strong>如果没有自动重连，请手动关闭 Wi-Fi 约 5 秒后再打开。</p>"
+		"<p><strong>路由器会让手机自动重新连接 Wi-Fi。</strong>如果没有自动重连，请手动关闭 Wi-Fi 约 5 秒后再打开。</p>" ..
+		"<p class=\"hint\">如需连接其他口令槽位，可直接重新输入新口令进行更换。</p>" ..
+		"<a class=\"link\" href=\"\">更换为其他口令</a>"
 	qr_bind_page("绑定成功", body, "ok")
 end
 
