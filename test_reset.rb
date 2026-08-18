@@ -37,10 +37,13 @@ abort "reset failed" unless result["ok"]
 config = YAML.load_file(test_source, aliases: true)
 abort "nodes not cleared" unless Array(config["proxies"]).empty?
 abort "anchor names not cleared" unless Array(config.dig("pr", "proxies")).empty?
-abort "device rules not cleared" if Array(config["rules"]).any? { |rule| rule.to_s.start_with?("SRC-IP-CIDR,") }
+abort "device rules not cleared" if Array(config["rules"]).any? { |rule| rule.to_s.start_with?("SRC-IP-CIDR,") && !rule.to_s.include?(",DIRECT") }
+abort "direct rule missing after reset" unless Array(config["rules"]).include?("SRC-IP-CIDR,#{direct_slot_ip},DIRECT")
 abort "base rules were removed" unless Array(config["rules"]).any? { |rule| rule.to_s.start_with?("RULE-SET,") }
 abort "state not cleared" if File.exist?(test_state)
 abort "formal config was modified" unless File.binread(original) == original_contents
+reset_slots = YAML.safe_load(File.read(ENV["OPENCLASH_EDITOR_SLOT_STATE"]), aliases: true).fetch("slots")
+abort "direct slot missing after reset" unless reset_slots.any? { |slot| slot["id"] == DIRECT_SLOT_ID && slot["code"] == "000" && slot["node"] == "DIRECT" && slot["mac"].to_s.empty? }
 
 File.delete(test_source) if File.exist?(test_source)
 File.delete(result["backup"]) if File.exist?(result["backup"])

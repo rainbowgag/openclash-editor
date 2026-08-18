@@ -1,19 +1,28 @@
 # HANDOFF — OpenClash Visual Editor 交接
 
 ## Stopped here
-本会话完成「项目记忆 + 开发骨架」：新建 AGENTS.md、docs/ARCHITECTURE.md、HANDOFF.md、scripts/release.sh，更新 .gitignore/.gitattributes。
+本会话实现「内置直连槽位」：口令 000 的永久直连槽位（固定当前 LAN 网段 .254、规则 DIRECT），reset 后仍存在，前端锁定不可删除/改口令/改节点。
 当前分支 codex/qr-device-binding-test @ VERSION 2.3.0（与 origin/main 同点 8b87893），除两个未跟踪的 6115 诊断脚本外工作树干净。
-开发机（Windows）：有 Node 24 / Git / Python，无 Ruby、Lua（相关检查在 scripts/release.sh 中自动跳过）；真机验证在 AX6000。
+改动：backend.rb（直连槽位常量/自动并入/reset 重建/各路径特判）、slots.htm（永久槽位展示与锁定）、rules.htm（DIRECT 规则只读保护）、editor-common.js（.254 不参与自动分配）、test_slots.rb / test_reset.rb 适配。
+开发机（Windows）：有 Node 24 / Git / Python，无 Ruby、Lua；JS/视图语法检查与 node test_converter.js 已通过。
 
 ## Next
-进入阶段 2（测试与验证体系）：跑通 node test_converter.js 与 scripts/release.sh check；在真机执行一次完整验收清单（安装 → 各协议导入 → 预览 → 应用 → 重启 → 槽位扫码绑定 → 换绑/解绑 → 恢复初始配置），把结果与命令固化进 AGENTS.md。
+真机验证（AX6000，root）：先跑 ruby test_slots.rb 与 ruby test_reset.rb（/tmp 路径，不动正式配置），再安装后人工验收：口令 000 绑定设备 → 设备拿到网段 .254 且直连；001+ 槽位正常；删除/改口令/改节点对直连槽位报错；恢复初始配置后直连槽位与 DIRECT 规则仍在。
 
 ## Blocker
-无。注意：正式发布（push origin/main + 镜像更新）需真机验收，本会话未做。
+本机无 Ruby，Ruby 单测与语法检查未在本机执行（已在 backend.rb 用静态复核）；真机验收必须在下个会话完成后再考虑发布。
 
 ---
 
 ## 最近完成
+
+- 2026-08-19：内置直连槽位（口令 000）
+  - backend.rb：新增 DIRECT_SLOT_ID=000000000001 / CODE=000 / NODE=DIRECT；read_slots 自动并入直连槽位并持久化；direct_slot_ip 计算当前网段 .254（自动避开网关并夹取到网段内）；reset 后重建槽位与 DIRECT 规则；slot_code! 放行 000；apply/repair/bind/preview/normalize 各路径对 DIRECT 特判；删除/改口令/改节点对直连槽位拒绝；分配 IP 时保留 .254
+  - slots.htm：直连槽位置顶、显示「直连槽位 · 固定直连」徽标、无勾选/改口令/改节点/删除按钮，仅保留复制口令与解绑；页面文案说明 000 用法
+  - rules.htm：DIRECT 规则只读展示（不可修改/删除/批量选择）；手动添加规则与自动分配均避开直连槽位 IP
+  - editor-common.js：recalculateNextIp 把槽位 IP 计入已占用（含直连槽位 .254）
+  - test_slots.rb / test_reset.rb：适配直连槽位计数并新增保护断言
+  - 视图/JS 语法检查（node --check 提取脚本）全部通过；后端为静态复核，待真机跑单测
 
 - 2026-08-18：搭建项目记忆与骨架
   - 新建 AGENTS.md（定位/技术栈/命令/约定/禁用事项）

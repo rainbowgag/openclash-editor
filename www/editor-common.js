@@ -68,6 +68,10 @@
       var value = ipToInt(ruleParts(rule).ip.replace(/\/32$/, ''));
       if (value !== null) used[value] = true;
     });
+    (draft.slots || []).forEach(function(slot) {
+      var value = ipToInt(slot.ip);
+      if (value !== null) used[value] = true;
+    });
     while (start <= info.last && (used[start] || start === gateway)) start++;
     draft.next_ip = start <= info.last ? intToIp(start) : '';
     return draft.next_ip;

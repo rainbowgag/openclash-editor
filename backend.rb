@@ -21,6 +21,10 @@ VERSION_FILE = "/usr/share/openclash-editor/VERSION"
 QR_TOKEN_DIR = "/tmp/openclash-editor-qr"
 QR_TOKEN_TTL = 600
 REBIND_WINDOW_SECONDS = 600
+DIRECT_SLOT_ID = "000000000001"
+DIRECT_SLOT_CODE = "000"
+DIRECT_NODE = "DIRECT"
+DIRECT_SLOT_NAME = "直连槽位"
 SLOT_STATE = ENV["OPENCLASH_EDITOR_SLOT_STATE"].to_s.strip.empty? ? "/etc/openclash/openclash-editor-slots.json" : ENV["OPENCLASH_EDITOR_SLOT_STATE"].to_s
 SLOT_LOCK = ENV["OPENCLASH_EDITOR_SLOT_LOCK"].to_s.strip.empty? ? "/tmp/openclash-editor-slots.lock" : ENV["OPENCLASH_EDITOR_SLOT_LOCK"].to_s
 SKIP_SLOT_DHCP = ENV["OPENCLASH_EDITOR_SKIP_SLOT_DHCP"] == "1"
@@ -118,10 +122,13 @@ end
 def read_slots
   data = YAML.safe_load(File.read(SLOT_STATE), aliases: true) || {}
   slots = Array(data["slots"]).select { |slot| slot.is_a?(Hash) }
-  write_slots(slots) if normalize_slot_codes!(slots)
+  normalized = normalize_slot_codes!(slots)
+  slots, ensured = ensure_direct_slot_in_list!(slots)
+  write_slots(slots) if normalized || ensured
   slots
 rescue Errno::ENOENT, Psych::SyntaxError
-  []
+  slots, = ensure_direct_slot_in_list!([])
+  slots
 end
 
 def write_slots(slots)
@@ -131,6 +138,47 @@ def write_slots(slots)
   File.write(staged, json_generate({ "slots" => slots }))
   File.chmod(0o600, staged)
   File.rename(staged, SLOT_STATE)
+end
+
+# 内置直连槽位：固定口令 000，固定使用当前 LAN 网段的 .254 地址，规则 DIRECT。
+# 该槽位由 read_slots 自动并入、不可删除，初始化/重置后仍存在。
+def direct_slot_ip(lan = nil)
+  lan ||= detect_lan
+  network = cidr_info(lan.fetch("cidr"))
+  value = network["network_i"] + 254
+  value = network["last_i"] if value > network["last_i"]
+  value = network["first_i"] if value <= network["network_i"]
+  gateway_i = lan["gateway"].to_s.empty? ? nil : ipv4_to_i(lan["gateway"])
+  value += 1 if gateway_i && value == gateway_i && value < network["last_i"]
+  i_to_ipv4(value)
+end
+
+def build_direct_slot(existing = nil)
+  now = Time.now.to_i
+  {
+    "id" => DIRECT_SLOT_ID,
+    "token" => existing && !existing["token"].to_s.empty? ? existing["token"].to_s : random_hex(16),
+    "code" => DIRECT_SLOT_CODE,
+    "name" => DIRECT_SLOT_NAME,
+    "ip" => direct_slot_ip,
+    "node" => DIRECT_NODE,
+    "mac" => existing ? existing["mac"].to_s : "",
+    "device_name" => existing ? existing["device_name"].to_s : "",
+    "created_at" => existing ? existing["created_at"].to_i : now,
+    "updated_at" => now,
+    "last_bound_at" => existing ? existing["last_bound_at"].to_i : 0,
+    "rebind_until" => existing ? existing["rebind_until"].to_i : 0
+  }
+end
+
+def ensure_direct_slot_in_list!(slots)
+  working = Array(slots).select { |slot| slot.is_a?(Hash) }
+  existing = working.find { |slot| slot["id"].to_s == DIRECT_SLOT_ID }
+  built = build_direct_slot(existing)
+  changed = !existing || existing["ip"].to_s != built["ip"] || existing["node"].to_s != built["node"]
+  working.reject! { |slot| slot["id"].to_s == DIRECT_SLOT_ID }
+  working.unshift(built)
+  [working, changed]
 end
 
 def with_slot_lock
@@ -151,7 +199,7 @@ def slot_code!(value)
   raise "请输入槽位口令" unless raw.match?(/\A[A-Z0-9]{1,12}\z/)
   if raw.match?(/\A\d+\z/)
     number = raw.to_i
-    raise "槽位口令无效" unless number.positive?
+    raise "槽位口令无效" if number.zero? && raw != DIRECT_SLOT_CODE
     return format("%03d", number)
   end
   raw
@@ -433,7 +481,7 @@ def apply_qr_rule_changes(changes)
   end
   changes.each_value do |node_name|
     next if node_name.nil?
-    raise "目标节点不存在：#{node_name}" unless names.include?(node_name)
+    raise "目标节点不存在：#{node_name}" unless names.include?(node_name) || node_name.to_s == DIRECT_NODE
   end
 
   rules = device_rules(config).reject do |rule|
@@ -937,6 +985,7 @@ def augment_slots_from_rules(slots, rules, node_names)
     next unless parts && known_nodes.include?(parts["name"])
 
     slot = by_ip[parts["ip"]]
+    next if slot && slot["id"].to_s == DIRECT_SLOT_ID
     if slot
       next if slot["node"].to_s == parts["name"]
 
@@ -999,6 +1048,7 @@ def slots_response
       "current_ip" => lease ? lease["ip"].to_s : "",
       "rule_node" => rules_by_ip[slot["ip"].to_s].to_s,
       "rule_ok" => rules_by_ip[slot["ip"].to_s].to_s == slot["node"].to_s,
+      "permanent" => slot["id"].to_s == DIRECT_SLOT_ID,
       "locked" => rebind["locked"],
       "rebind_allowed" => rebind["rebind_allowed"],
       "rebind_until" => rebind["rebind_until"],
@@ -1027,7 +1077,7 @@ def slots_repair_response
       node["name"].to_s if node.is_a?(Hash) && !node["name"].to_s.empty?
     end
     slots, created, updated = augment_slots_from_rules(read_slots, device_rules(config), node_names)
-    invalid = slots.reject { |slot| node_names.include?(slot["node"].to_s) }
+    invalid = slots.reject { |slot| node_names.include?(slot["node"].to_s) || slot["id"].to_s == DIRECT_SLOT_ID }
     unless invalid.empty?
       details = invalid.first(10).map do |slot|
         "#{slot['code']}（#{slot['ip']}，#{slot['node']}）"
@@ -1196,6 +1246,7 @@ def slot_update_response(id, node_name)
   with_slot_lock do
     slots = read_slots
     slot = slot_by_id!(slots, id)
+    raise "直连槽位固定使用 #{DIRECT_NODE}，不能修改目标节点" if slot["id"].to_s == DIRECT_SLOT_ID
     node_name = node_name.to_s.strip
     raise "请输入已有节点的准确名称" if node_name.empty?
     raise "目标节点不存在：#{node_name}" unless config_node_names.include?(node_name)
@@ -1220,6 +1271,7 @@ def slot_code_update_response(id, code_value)
   with_slot_lock do
     slots = read_slots
     slot = slot_by_id!(slots, id)
+    raise "直连槽位的口令固定为 #{DIRECT_SLOT_CODE}，不能修改" if slot["id"].to_s == DIRECT_SLOT_ID
     code = slot_code!(code_value)
     duplicate = slots.find { |item| item["id"].to_s != slot["id"].to_s && item["code"].to_s == code }
     raise "槽位口令 #{code} 已被其他槽位使用" if duplicate
@@ -1299,6 +1351,7 @@ def slot_delete_response(id)
   with_slot_lock do
     slots = read_slots
     slot = slot_by_id!(slots, id)
+    raise "直连槽位是内置的，不能删除" if slot["id"].to_s == DIRECT_SLOT_ID
     backup = apply_qr_rule_change(slot["ip"])
     section = "oce_slot_#{slot['id']}"
     begin
@@ -1357,6 +1410,7 @@ def slots_delete_response(id_list)
     slots = read_slots
     selected = slots.select { |slot| ids.include?(slot["id"].to_s) }
     raise "没有找到选中的扫码槽位" if selected.empty?
+    raise "直连槽位是内置的，不能删除" if selected.any? { |slot| slot["id"].to_s == DIRECT_SLOT_ID }
     missing = ids - selected.map { |slot| slot["id"].to_s }
     raise "部分扫码槽位已经不存在：#{missing.join('、')}" unless missing.empty?
 
@@ -1392,6 +1446,7 @@ def slots_apply_pending_response
   raise "没有待应用的扫码槽位数据，请重新生成预览" unless File.file?(PENDING_SLOTS)
   pending = YAML.safe_load(File.read(PENDING_SLOTS), aliases: true) || {}
   desired = Array(pending["slots"]).select { |slot| slot.is_a?(Hash) }
+  desired, = ensure_direct_slot_in_list!(desired)
   with_slot_lock do
     current = read_slots
     desired_ids = desired.to_h { |slot| [slot["id"].to_s, true] }
@@ -1454,7 +1509,7 @@ def slot_bind_response(identifier, remote_address, force_rebind = false)
     slots = read_slots
     slot = force_rebind ? slot_by_code!(slots, identifier) : slot_by_token!(slots, identifier)
     target_ip = lan_ip!(slot["ip"])
-    raise "槽位引用的节点已经不存在：#{slot['node']}" unless config_node_names.include?(slot["node"].to_s)
+    raise "槽位引用的节点已经不存在：#{slot['node']}" unless config_node_names.include?(slot["node"].to_s) || slot["id"].to_s == DIRECT_SLOT_ID
     rebind = slot_rebind_status(slot, mac)
     unless force_rebind || rebind["can_bind"]
       raise "该扫码槽位已绑定其他设备并处于锁定状态，请联系管理员在扫码绑定页面点击“允许换绑”"
@@ -1658,6 +1713,11 @@ def first_available_ip(rules, network, start_ip)
     value = ipv4_to_i(parts["ip"])
     value if value.between?(network["first_i"], network["last_i"])
   end.to_h { |value| [value, true] }
+  begin
+    used[ipv4_to_i(direct_slot_ip)] = true
+  rescue StandardError
+    nil
+  end
   gateway_i = ipv4_to_i(network["gateway"]) unless network["gateway"].to_s.empty?
   candidate = ipv4_to_i(start_ip)
   candidate += 1 while candidate <= network["last_i"] && (used[candidate] || gateway_i == candidate)
@@ -1733,7 +1793,9 @@ def reset_response
   lines = File.read(SOURCE).gsub("\r\n", "\n").split("\n", -1)
   replace_anchor_names(lines, [])
   replace_nodes(lines, [])
-  replace_device_rules(lines, [])
+  direct_slot = build_direct_slot
+  direct_rule = "SRC-IP-CIDR,#{direct_slot['ip']}/32,#{DIRECT_NODE}"
+  replace_device_rules(lines, [direct_rule])
   generated = lines.join("\n")
   parsed = YAML.safe_load(generated, aliases: true)
   raise "恢复后的配置不是 YAML 映射" unless parsed.is_a?(Hash)
@@ -1756,7 +1818,7 @@ def reset_response
     end
     system("/etc/init.d/dnsmasq", "reload")
   end
-  File.delete(SLOT_STATE) if File.exist?(SLOT_STATE)
+  write_slots([direct_slot])
   File.delete(PENDING_SLOTS) if File.exist?(PENDING_SLOTS)
   File.delete(STATE) if File.exist?(STATE)
   { "ok" => true, "backup" => backup }
@@ -1831,7 +1893,7 @@ def normalize_preview_slots(requested_slots, node_names, rules)
     raise "扫码槽位名称不能为空" if name.empty?
     raise "扫码槽位名称不能包含逗号或换行：#{name}" if name.match?(/[,\r\n]/)
     raise "扫码槽位名称过长：#{name}" if name.bytesize > 180
-    raise "扫码槽位引用了不存在的节点：#{node_name}" unless node_names.include?(node_name)
+    raise "扫码槽位引用了不存在的节点：#{node_name}" unless node_names.include?(node_name) || (id == DIRECT_SLOT_ID && node_name == DIRECT_NODE)
     raise "扫码槽位 IP 不在当前 LAN 网段：#{address}" unless value.between?(network["first_i"], network["last_i"])
     raise "扫码槽位不能使用路由器自身地址：#{address}" if address == lan["gateway"]
     raise "扫码槽位缺少对应设备规则：#{address}/32 → #{node_name}" unless rules_by_ip[address].to_s == node_name
@@ -1867,6 +1929,13 @@ def preview_response(request_path)
   start_ip = request.fetch("start_ip").to_s
   manual_network = request["manual_network"] == true
   requested_slots = request.key?("slots") ? request["slots"] : read_slots
+  requested_slots, = ensure_direct_slot_in_list!(requested_slots)
+  direct_slot = requested_slots.find { |slot| slot["id"].to_s == DIRECT_SLOT_ID }
+  if direct_slot
+    direct_rule = "SRC-IP-CIDR,#{direct_slot['ip']}/32,#{DIRECT_NODE}"
+    rules = rules.dup
+    rules.unshift(direct_rule) unless rules.include?(direct_rule)
+  end
   start_ip_i = ipv4_to_i(start_ip)
   raise "自动分配起始 IP 不在规则网段内：#{start_ip}" unless start_ip_i.between?(network["first_i"], network["last_i"])
   raise "节点数据必须是数组" unless nodes.is_a?(Array)
@@ -1897,7 +1966,7 @@ def preview_response(request_path)
     full_ip_i = ipv4_to_i(full_ip)
     raise "内网 IP 重复：#{i_to_ipv4(full_ip_i)}" if seen_rule_ips[full_ip_i]
     seen_rule_ips[full_ip_i] = true
-    raise "规则引用了不存在的节点：#{parts['name']}" unless names.include?(parts["name"])
+    raise "规则引用了不存在的节点：#{parts['name']}" unless names.include?(parts["name"]) || parts["name"] == DIRECT_NODE
   end
   requested_slots, auto_created_slots, auto_updated_slots =
     augment_slots_from_rules(requested_slots, rules, names)

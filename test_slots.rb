@@ -29,28 +29,44 @@ File.delete(slot_lock_path) if File.exist?(slot_lock_path)
 
 require_relative "backend"
 
+def user_slots
+  read_slots.reject { |slot| slot["id"] == DIRECT_SLOT_ID }
+end
+
+# 内置直连槽位：口令 000、DIRECT、固定当前网段 .254
+direct_rule = "SRC-IP-CIDR,#{direct_slot_ip},DIRECT"
+config_lines = File.readlines(config_path)
+config_index = config_lines.index { |line| line.start_with?("  rules:") }
+abort "rules section not found" unless config_index
+config_lines.insert(config_index + 1, "    - #{direct_rule}\n")
+File.write(config_path, config_lines.join)
+
 created = slots_create_response("test-node", "2", "测试槽位", "1")
 abort "slot create count mismatch" unless created["created_count"] == 2
 slots = read_slots
-abort "slot state count mismatch" unless slots.length == 2
+abort "slot state count mismatch" unless slots.length == 3
+direct = slots.find { |slot| slot["id"] == DIRECT_SLOT_ID }
+abort "direct slot missing" unless direct && direct["code"] == "000" && direct["node"] == "DIRECT" && direct["name"] == "直连槽位"
+abort "direct slot ip mismatch" unless direct["ip"] == direct_slot_ip
 abort "slot token invalid" unless slots.all? { |slot| slot["token"].match?(/\A[0-9a-f]{32}\z/) }
-abort "slot codes were not assigned sequentially" unless slots.map { |slot| slot["code"] } == %w[001 002]
-abort "slot code lookup failed" unless slot_by_code!(slots, "1")["id"] == slots.first["id"]
-abort "slot IP duplicate" unless slots.map { |slot| slot["ip"] }.uniq.length == 2
+abort "slot codes were not assigned sequentially" unless user_slots.map { |slot| slot["code"] } == %w[001 002]
+abort "slot code lookup failed" unless slot_by_code!(slots, "1")["id"] == user_slots.first["id"]
+abort "slot IP duplicate" unless user_slots.map { |slot| slot["ip"] }.uniq.length == 2
 
-legacy_slots = slots.map { |slot| slot.reject { |key, _value| key == "code" } }
+legacy_slots = user_slots.map { |slot| slot.reject { |key, _value| key == "code" } }
 File.write(slot_state_path, json_generate({ "slots" => legacy_slots }))
-migrated_codes = read_slots.map { |slot| slot["code"] }
+migrated_codes = user_slots.map { |slot| slot["code"] }
 abort "legacy slots did not receive stable codes" unless migrated_codes == %w[001 002]
-persisted_codes = YAML.safe_load(File.read(slot_state_path), aliases: true).fetch("slots").map { |slot| slot["code"] }
+persisted_codes = YAML.safe_load(File.read(slot_state_path), aliases: true).fetch("slots").reject { |slot| slot["id"] == DIRECT_SLOT_ID }.map { |slot| slot["code"] }
 abort "migrated slot codes were not persisted" unless persisted_codes == %w[001 002]
 slots = read_slots
 
 config = YAML.load_file(config_path, aliases: true)
-slots.each do |slot|
+user_slots.each do |slot|
   expected = "SRC-IP-CIDR,#{slot['ip']}/32,test-node"
   abort "slot rule missing: #{expected}" unless Array(config["rules"]).include?(expected)
 end
+abort "direct rule missing" unless Array(config["rules"]).include?(direct_rule)
 
 missing_rule_slot = slots.last
 missing_rule = "- SRC-IP-CIDR,#{missing_rule_slot['ip']}/32,#{missing_rule_slot['node']}"
@@ -107,12 +123,14 @@ info = slot_info_response(new_token)
 abort "slot info mismatch" unless info.dig("slot", "name") == first["name"]
 
 listed = slots_response
-abort "slot list count mismatch" unless listed["slots"].length == 2
+abort "slot list count mismatch" unless listed["slots"].length == 3
+listed_direct = listed["slots"].find { |slot| slot["id"] == DIRECT_SLOT_ID }
+abort "direct slot missing from list" unless listed_direct && listed_direct["permanent"] && listed_direct["rule_ok"]
 
 group = slots_create_many_response("test-node,second-node")
 abort "group slot create count mismatch" unless group["created_count"] == 2
 slots = read_slots
-abort "group slot state count mismatch" unless slots.length == 4
+abort "group slot state count mismatch" unless user_slots.length == 4
 abort "group slot naming failed" unless group["created"].map { |slot| slot["name"] }.sort == ["second-node-槽位1", "test-node-槽位1"].sort
 abort "group slot codes were not continued" unless group["created"].map { |slot| slot["code"] } == %w[003 004]
 
@@ -169,18 +187,43 @@ File.write(preview_request_path, json_generate({
   "manual_network" => false
 }))
 preview = preview_response(preview_request_path)
-abort "slot preview failed" unless preview["slot_count"] == 6 && preview["diff"].include?("扫码槽位：新增 2")
+abort "slot preview failed" unless preview["slot_count"] == 7 && preview["diff"].include?("扫码槽位：新增 2")
 File.binwrite(config_path, File.binread(TEST))
 applied = slots_apply_pending_response
-abort "pending slots apply failed" unless applied["slot_count"] == 6 && read_slots.length == 6
+abort "pending slots apply failed" unless applied["slot_count"] == 7 && read_slots.length == 7
 
 bulk_deleted = slots_delete_response(planned["created"].map { |slot| slot["id"] }.join(","))
-abort "bulk slot delete failed" unless bulk_deleted["deleted_count"] == 2 && read_slots.length == 4
+abort "bulk slot delete failed" unless bulk_deleted["deleted_count"] == 2 && read_slots.length == 5
 
 deleted = slot_delete_response(first["id"])
-abort "slot delete failed" unless deleted["ok"] && read_slots.length == 3
+abort "slot delete failed" unless deleted["ok"] && read_slots.length == 4
 config = YAML.load_file(config_path, aliases: true)
 abort "deleted slot rule remained" if Array(config["rules"]).any? { |rule| rule.start_with?("SRC-IP-CIDR,#{first['ip']}/32,") }
+
+begin
+  slot_delete_response(DIRECT_SLOT_ID)
+  abort "direct slot delete was accepted"
+rescue StandardError => error
+  abort "direct slot delete wrong error" unless error.message.include?("不能删除")
+end
+begin
+  slots_delete_response(DIRECT_SLOT_ID)
+  abort "direct slot bulk delete was accepted"
+rescue StandardError => error
+  abort "direct slot bulk delete wrong error" unless error.message.include?("不能删除")
+end
+begin
+  slot_code_update_response(DIRECT_SLOT_ID, "h377")
+  abort "direct slot code change was accepted"
+rescue StandardError => error
+  abort "direct slot code change wrong error" unless error.message.include?("不能修改")
+end
+begin
+  slot_update_response(DIRECT_SLOT_ID, "second-node")
+  abort "direct slot node change was accepted"
+rescue StandardError => error
+  abort "direct slot node change wrong error" unless error.message.include?("不能修改")
+end
 
 historical_ip = slot_allocatable_ips(1).first
 apply_qr_rule(historical_ip, "second-node")

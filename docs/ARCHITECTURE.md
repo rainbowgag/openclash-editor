@@ -56,6 +56,7 @@ flowchart LR
 5. **纯脚本、零架构依赖**。无编译产物；前端 ES5、后端仅标准库、shell 全部 POSIX；对 Lua 5.1 / 旧版 LuCI / uhttpd / nginx / nft / iptables 均有兼容层或双实现。
 6. **槽位状态独立持久化**。/etc/openclash/openclash-editor-slots.json 与主状态分离，portal 只读它，避免与用户 OpenClash 配置耦合；测试可用环境变量覆盖所有路径。
 7. **门户修改全部可逆**。portal-watch.sh setup/cleanup 幂等，对 uhttpd index、nginx locations、hosts、probe 文件、防火墙规则的所有改动都有备份与恢复路径。
+8. **内置直连槽位永久存在**。口令 000 的直连槽位（固定当前 LAN 网段 .254、规则 DIRECT）由 read_slots 自动并入、reset 后重建，预览/修复/绑定各路径特判放行；前端禁止其删除、改口令与改节点。相关常量集中在 backend.rb 顶部（DIRECT_SLOT_ID / DIRECT_SLOT_CODE / DIRECT_NODE）。
 
 ## 5. 主要数据流
 

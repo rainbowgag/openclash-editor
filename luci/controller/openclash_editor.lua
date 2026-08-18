@@ -586,7 +586,7 @@ end
 local function code_bind_form(error_message)
 	local warning = error_message and error_message ~= "" and
 		("<p style=\"color:#b42318;font-weight:700\">" .. pcdata(error_message) .. "</p>") or
-		"<p>请输入管理员分配的槽位口令，例如 <strong>001</strong> 或 <strong>H377</strong>。</p>"
+		"<p>请输入管理员分配的槽位口令：<strong>000</strong> 为直连（固定 .254，不走代理），001 起连接代理节点，例如 <strong>001</strong> 或 <strong>H377</strong>。</p>"
 	local body = warning ..
 		"<form method=\"post\" action=\"\">" ..
 		"<input class=\"input\" name=\"code\" type=\"text\" inputmode=\"text\" pattern=\"[A-Za-z0-9]*\" maxlength=\"12\" autocapitalize=\"characters\" autocomplete=\"one-time-code\" autofocus placeholder=\"001 或 H377\">" ..
