@@ -38,7 +38,7 @@ config = YAML.load_file(test_source, aliases: true)
 abort "nodes not cleared" unless Array(config["proxies"]).empty?
 abort "anchor names not cleared" unless Array(config.dig("pr", "proxies")).empty?
 abort "device rules not cleared" if Array(config["rules"]).any? { |rule| rule.to_s.start_with?("SRC-IP-CIDR,") && !rule.to_s.include?(",DIRECT") }
-abort "direct rule missing after reset" unless Array(config["rules"]).include?("SRC-IP-CIDR,#{direct_slot_ip},DIRECT")
+abort "direct rule missing after reset" unless Array(config["rules"]).include?("SRC-IP-CIDR,#{direct_slot_ip}/32,DIRECT")
 abort "base rules were removed" unless Array(config["rules"]).any? { |rule| rule.to_s.start_with?("RULE-SET,") }
 abort "state not cleared" if File.exist?(test_state)
 abort "formal config was modified" unless File.binread(original) == original_contents

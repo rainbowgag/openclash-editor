@@ -1,17 +1,20 @@
 # HANDOFF — OpenClash Visual Editor 交接
 
 ## Stopped here
-本会话实现「内置直连槽位」：口令 000 的永久直连槽位（固定当前 LAN 网段 .254、规则 DIRECT），reset 后仍存在，前端锁定不可删除/改口令/改节点。
-当前分支 codex/qr-device-binding-test @ VERSION 2.3.0（与 origin/main 同点 8b87893），除两个未跟踪的 6115 诊断脚本外工作树干净。
-改动：backend.rb（直连槽位常量/自动并入/reset 重建/各路径特判）、slots.htm（永久槽位展示与锁定）、rules.htm（DIRECT 规则只读保护）、editor-common.js（.254 不参与自动分配）、test_slots.rb / test_reset.rb 适配。
-开发机（Windows）：有 Node 24 / Git / Python，无 Ruby、Lua；JS/视图语法检查与 node test_converter.js 已通过。
+真机验证已完成（Kwrt / mediatek filogic，root@192.168.100.1，Ruby 3.4.9）。
+
+- ruby test_slots.rb 与 test_reset.rb 均通过；修正测试断言：直连规则需带 /32、rules: 定位与缩进，绑定/改节点用例改为选取用户槽位而非排在最前的直连槽位。
+- 真机安装后：slots 自动出现永久直连槽位（000 / 192.168.100.254 / DIRECT / permanent=true）；slots-repair 后在 /etc/openclash/config/config.yaml 顶部写入 SRC-IP-CIDR,192.168.100.254/32,DIRECT，rule_ok=true。
+- 模拟口令 000 绑定（临时租约 02:11:22:33:44:55 @ 192.168.100.100）成功：uci 生成 dhcp.oce_slot_000000000001.ip=192.168.100.254，槽位 locked=true；解绑清理正常。
+- 对直连槽位执行删除 / 改口令 / 改节点均返回“不能删除 / 不能修改”；reset 单测验证直连槽位与 DIRECT 规则保留。
+- 当前分支 codex/qr-device-binding-test @ VERSION 2.3.0；正式发布前建议再做一次真实手机端到端验收。
 
 ## Next
-真机验证（AX6000，root）：先跑 ruby test_slots.rb 与 ruby test_reset.rb（/tmp 路径，不动正式配置），再安装后人工验收：口令 000 绑定设备 → 设备拿到网段 .254 且直连；001+ 槽位正常；删除/改口令/改节点对直连槽位报错；恢复初始配置后直连槽位与 DIRECT 规则仍在。
+- 发布 test/正式版（scripts/release.sh all，并同步 README 依赖与版本说明）。
+- 真实手机连 Wi-Fi 输入 000 做一次端到端人工验收。
 
 ## Blocker
-本机无 Ruby，Ruby 单测与语法检查未在本机执行（已在 backend.rb 用静态复核）；真机验收必须在下个会话完成后再考虑发布。
-
+无阻塞。
 ---
 
 ## 最近完成

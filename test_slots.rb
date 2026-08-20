@@ -34,11 +34,11 @@ def user_slots
 end
 
 # 内置直连槽位：口令 000、DIRECT、固定当前网段 .254
-direct_rule = "SRC-IP-CIDR,#{direct_slot_ip},DIRECT"
+direct_rule = "SRC-IP-CIDR,#{direct_slot_ip}/32,DIRECT"
 config_lines = File.readlines(config_path)
-config_index = config_lines.index { |line| line.start_with?("  rules:") }
+config_index = config_lines.index { |line| line.strip == "rules:" }
 abort "rules section not found" unless config_index
-config_lines.insert(config_index + 1, "    - #{direct_rule}\n")
+config_lines.insert(config_index + 1, "  - #{direct_rule}\n")
 File.write(config_path, config_lines.join)
 
 created = slots_create_response("test-node", "2", "测试槽位", "1")
@@ -78,7 +78,7 @@ abort "missing slot rule was not repaired" unless repaired["repaired_count"] == 
 repaired_slot = slots_response["slots"].find { |slot| slot["id"] == missing_rule_slot["id"] }
 abort "repaired slot rule still reports a mismatch" unless repaired_slot["rule_ok"]
 
-first = slots.first
+first = slots.find { |slot| slot["id"] != DIRECT_SLOT_ID }
 old_token = first["token"]
 bound_probe = first.merge("mac" => "02:11:22:33:44:55", "rebind_until" => 0)
 different_device = slot_rebind_status(bound_probe, "02:aa:bb:cc:dd:ee", 1_000)
