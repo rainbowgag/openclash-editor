@@ -40,6 +40,7 @@
   function el(id){return document.getElementById(id)} function msg(text,type){var x=el('status');x.textContent=text;x.className='oce-status '+(type==='ok'?'oce-ok':type==='warn'?'oce-warn':'oce-error')}
   function exists(name){return draft.nodes.some(function(n){return n.name===name})}
   function hasRouterProxy(){return draft.nodes.some(function(n){return n.in_pr})}
+  function ensureRouterProxy(){if(draft.nodes.length&&!draft.nodes.some(function(n){return n.in_pr})){draft.nodes[0].in_pr=true;draft.nodes[0]._edited=true}}
   function nodeRow(n,i){return '<tr><td><input class="node-select oce-check" data-name="'+E.esc(n.name)+'" type="checkbox" '+(selectedNodes[n.name]?'checked':'')+' aria-label="选择节点 '+E.esc(n.name)+'"></td><td><strong>'+E.esc(n.name)+'</strong></td><td><input class="node-pr oce-check" data-i="'+i+'" type="checkbox" '+(n.in_pr?'checked':'')+' title="设为路由器代理节点"></td><td>'+E.esc(n.type)+'</td><td>'+E.esc(n.server)+(n.port?':'+E.esc(n.port):'')+'</td><td><button class="btn cbi-button rename" data-i="'+i+'" type="button">改名</button> <button class="btn cbi-button oce-danger delete" data-i="'+i+'" type="button">删除</button></td></tr>'}
   function changed(n){return draft.existing_node_names.indexOf(n.name)<0||n._edited}
   function updateBulkRenamePreview(){var prefix=el('bulk_rename_prefix').value.trim()||'节点',start=Number(el('bulk_rename_start').value);if(!Number.isInteger(start)||start<0)start=1;el('bulk_rename_preview').textContent='命名预览：'+prefix+start+'、'+prefix+(start+1)+'、'+prefix+(start+2)+'……'}
@@ -59,10 +60,11 @@
     var addFirstToRouter=el('add_to_pr').checked,autoSlots=el('auto_create_slots').checked,button=el('import_btn');
     accepted.forEach(function(n,index){draft.nodes.push({name:String(n.name),type:String(n.type||''),server:String(n.server||''),port:n.port,in_pr:addFirstToRouter&&index===0,data:n})});
     draft.selected_node_names=accepted.map(function(n){return n.name});
-    if(addFirstToRouter)el('add_to_pr').checked=false;
+    ensureRouterProxy();
+    el('add_to_pr').checked=!hasRouterProxy();
     render();
     var importedCodeCount=accepted.reduce(function(total,n){return total+(slotCodesByName[n.name]||[]).length},0);
-    var notes=['已添加 '+accepted.length+' 个节点',addFirstToRouter?'首个节点已设为路由器代理节点':'未自动设置路由器代理节点'];
+    var notes=['已添加 '+accepted.length+' 个节点',addFirstToRouter?'首个节点已设为路由器代理节点':'已确保至少一个路由器代理节点'];
     if(importedCodeCount)notes.push('检测到 '+importedCodeCount+' 个自定义口令');
     if(renameEnabled)notes.push('批量命名：'+accepted[0].name+(accepted.length>1?' ～ '+accepted[accepted.length-1].name:''));
     if(skipped.length)notes.push('跳过同名节点：'+skipped.join('、'));
@@ -112,22 +114,22 @@
       draft.rules=draft.rules.filter(function(r){return E.ruleParts(r).name!==n.name});
       draft.slots=(draft.slots||[]).filter(function(slot){return slot.node!==n.name});
     }
-    draft.nodes.splice(i,1);draft.selected_node_names=(draft.selected_node_names||[]).filter(function(x){return x!==n.name});delete selectedNodes[n.name];el('add_to_pr').checked=!hasRouterProxy();render();
+    draft.nodes.splice(i,1);draft.selected_node_names=(draft.selected_node_names||[]).filter(function(x){return x!==n.name});delete selectedNodes[n.name];ensureRouterProxy();el('add_to_pr').checked=!hasRouterProxy();render();
     msg(replacement?'节点已删除，关联规则和扫码槽位已迁移':'节点、关联规则和扫码槽位已删除','warn');
   }
   function bulkDeleteNodes(){
     var names=Object.keys(selectedNodes).filter(function(name){return selectedNodes[name]&&exists(name)});if(!names.length)return;
     var linked=draft.rules.filter(function(r){return selectedNodes[E.ruleParts(r).name]}).length,linkedSlots=(draft.slots||[]).filter(function(slot){return selectedNodes[slot.node]}).length;
     if(!confirm('确认批量删除 '+names.length+' 个节点？\n同时会删除 '+linked+' 条关联规则和 '+linkedSlots+' 个扫码槽位。'))return;
-    var result=E.removeNodes(draft,names);selectedNodes=Object.create(null);el('add_to_pr').checked=!hasRouterProxy();render();
+    var result=E.removeNodes(draft,names);selectedNodes=Object.create(null);ensureRouterProxy();el('add_to_pr').checked=!hasRouterProxy();render();
     msg('已批量删除 '+result.nodes+' 个节点、'+result.rules+' 条规则和 '+result.slots+' 个扫码槽位','warn');
   }
-  function tableEvent(e){var i=Number(e.target.getAttribute('data-i'));if(e.target.classList.contains('node-select')){if(e.target.checked)selectedNodes[e.target.getAttribute('data-name')]=true;else delete selectedNodes[e.target.getAttribute('data-name')];syncNodeSelection();return}if(e.target.classList.contains('rename'))renameNode(i);if(e.target.classList.contains('delete'))deleteNode(i);if(e.target.classList.contains('node-pr')&&draft.nodes[i]){draft.nodes[i].in_pr=e.target.checked;draft.nodes[i]._edited=true;el('add_to_pr').checked=!hasRouterProxy();render()}}
+  function tableEvent(e){var i=Number(e.target.getAttribute('data-i'));if(e.target.classList.contains('node-select')){if(e.target.checked)selectedNodes[e.target.getAttribute('data-name')]=true;else delete selectedNodes[e.target.getAttribute('data-name')];syncNodeSelection();return}if(e.target.classList.contains('rename'))renameNode(i);if(e.target.classList.contains('delete'))deleteNode(i);if(e.target.classList.contains('node-pr')&&draft.nodes[i]){if(e.target.checked){draft.nodes[i].in_pr=true;draft.nodes[i]._edited=true}else{var keep=draft.nodes.some(function(n,idx){return idx!==i&&n.in_pr});if(!keep){e.target.checked=true;msg('至少需要保留一个路由器代理节点','error');return}draft.nodes[i].in_pr=false;draft.nodes[i]._edited=true}el('add_to_pr').checked=!hasRouterProxy();render()}}
   function checkUpdate(){E.get(urls.updateCheck).then(function(r){el('version').textContent='当前版本 '+(r.current||draft.version);if(r.ok&&r.available){el('update_btn').style.display='';el('update_btn').textContent=r.repair?'检测到安装不完整，立即修复':'发现 '+r.latest+'，立即更新'}}).catch(function(){el('version').textContent='当前版本 '+draft.version})}
   el('update_btn').onclick=function(){if(!confirm('确认在线更新插件？正式 OpenClash 配置不会被修改。'))return;this.disabled=true;E.post(urls.update,{}).then(function(r){if(!r.ok)throw new Error(r.error+(r.details?'\n'+r.details:''));alert('插件已更新到 '+r.version+'，页面将刷新。');location.reload()}).catch(function(e){msg(e.message,'error');el('update_btn').disabled=false})};
   el('reset_btn').onclick=function(){if(!confirm('确认恢复初始配置？\n这会立即备份正式配置，然后清空全部节点、路由器代理节点名称和 SRC-IP-CIDR 设备规则；其他基础配置与规则会保留。'))return;this.disabled=true;E.post(urls.reset,{}).then(function(r){if(!r.ok)throw new Error(r.error+(r.details?'\n'+r.details:''));E.clearDraft();alert('已恢复初始配置。备份：'+r.backup);location.reload()}).catch(function(e){msg(e.message,'error');el('reset_btn').disabled=false})};
   el('dialer_btn').onclick=function(){dialer=!dialer;this.textContent=dialer?'已添加前置代理（中转）':'添加前置代理';el('dialer_hint').innerHTML=dialer?'新导入节点会添加 <code>dialer-proxy: 中转</code>':'前置代理未启用；启用后固定添加 <code>dialer-proxy: 中转</code>。'};el('bulk_rename_enabled').onchange=function(){el('bulk_rename_btn').disabled=!this.checked};el('bulk_rename_btn').onclick=openBulkRename;el('bulk_rename_prefix').oninput=updateBulkRenamePreview;el('bulk_rename_start').oninput=updateBulkRenamePreview;el('bulk_rename_confirm').onclick=saveBulkRename;el('bulk_rename_cancel').onclick=closeBulkRename;el('bulk_rename_modal').onclick=function(e){if(e.target===this)closeBulkRename()};el('import_btn').onclick=importNodes;el('clear_btn').onclick=function(){el('links').value=''};el('node_search').oninput=render;el('node_search_clear').onclick=function(){el('node_search').value='';render();el('node_search').focus()};el('node_select_all').onchange=function(){var checked=this.checked;visibleNodeNames().forEach(function(name){if(checked)selectedNodes[name]=true;else delete selectedNodes[name]});render()};el('node_bulk_delete').onclick=bulkDeleteNodes;el('existing_body').onclick=tableEvent;el('existing_body').onchange=tableEvent;el('new_body').onclick=tableEvent;el('new_body').onchange=tableEvent;
-  E.loadDraft().then(function(d){draft=d;el('add_to_pr').checked=!hasRouterProxy();render();msg('已读取正式配置；运行平台 '+draft.architecture+'；当前修改仅保存在浏览器草稿','ok');checkUpdate()}).catch(function(e){msg(e.message,'error')});
+  E.loadDraft().then(function(d){draft=d;ensureRouterProxy();el('add_to_pr').checked=!hasRouterProxy();render();msg('已读取正式配置；运行平台 '+draft.architecture+'；当前修改仅保存在浏览器草稿','ok');checkUpdate()}).catch(function(e){msg(e.message,'error')});
 })();
 </script>
 <%+footer%>

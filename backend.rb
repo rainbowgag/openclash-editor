@@ -1954,6 +1954,7 @@ def preview_response(request_path)
   duplicates = names.group_by(&:itself).select { |_name, list| list.length > 1 }.keys
   raise "节点名称重复：#{duplicates.join(', ')}" unless duplicates.empty?
   anchor_names = anchor_names.map(&:to_s)
+  anchor_names = [names.first] if anchor_names.empty? && !names.empty?
   missing_anchor_names = anchor_names.reject { |name| names.include?(name) }
   raise "pr 引用了不存在的节点：#{missing_anchor_names.join(', ')}" unless missing_anchor_names.empty?
   raise "pr 节点名称重复" unless anchor_names.uniq.length == anchor_names.length
