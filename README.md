@@ -55,7 +55,7 @@
 执行下面一条命令后，输入 `1` 安装口令绑定版，输入 `2` 安装手动绑定 IP 版：
 
 ```sh
-rm -f /tmp/openclash-editor-install.sh; (curl -fL --resolve yy.yaml.uk:9443:103.27.78.68 --connect-timeout 20 --max-time 120 --retry 2 --show-error -o /tmp/openclash-editor-install.sh 'https://yy.yaml.uk:9443/openclash-editor/install.sh' || curl -fL --connect-timeout 20 --max-time 120 --retry 2 --show-error -o /tmp/openclash-editor-install.sh 'http://103.27.78.68/openclash-editor/install.sh') && sh /tmp/openclash-editor-install.sh
+rm -f /tmp/openclash-editor-install.sh; (curl -fL --resolve m.yaml.uk:9443:38.58.59.103 --connect-timeout 20 --max-time 120 --retry 2 --show-error -o /tmp/openclash-editor-install.sh 'https://m.yaml.uk:9443/openclash-editor/install.sh' || curl -fL --connect-timeout 20 --max-time 120 --retry 2 --show-error -o /tmp/openclash-editor-install.sh 'http://38.58.59.103/openclash-editor/install.sh') && sh /tmp/openclash-editor-install.sh
 ```
 
 ### 口令绑定正式版
@@ -63,7 +63,7 @@ rm -f /tmp/openclash-editor-install.sh; (curl -fL --resolve yy.yaml.uk:9443:103.
 下面的命令直接安装口令绑定正式版。`--resolve` 可在路由器本地 DNS 暂时不可用时仍然校验证书并下载，安装后的在线更新也会记住该解析地址：
 
 ```sh
-rm -f /tmp/openclash-editor-scan.sh; BASE_URL='https://yy.yaml.uk:9443/openclash-editor/scan'; (curl -fL --resolve yy.yaml.uk:9443:103.27.78.68 --connect-timeout 20 --max-time 120 --retry 2 --show-error -o /tmp/openclash-editor-scan.sh "${BASE_URL}/install.sh" || { BASE_URL='http://103.27.78.68/openclash-editor/scan'; curl -fL --connect-timeout 20 --max-time 120 --retry 2 --show-error -o /tmp/openclash-editor-scan.sh "${BASE_URL}/install.sh"; }) && OPENCLASH_EDITOR_BASE_URL="$BASE_URL" OPENCLASH_EDITOR_RESOLVE_IP='103.27.78.68' sh /tmp/openclash-editor-scan.sh
+rm -f /tmp/openclash-editor-scan.sh; BASE_URL='https://m.yaml.uk:9443/openclash-editor/scan'; (curl -fL --resolve m.yaml.uk:9443:38.58.59.103 --connect-timeout 20 --max-time 120 --retry 2 --show-error -o /tmp/openclash-editor-scan.sh "${BASE_URL}/install.sh" || { BASE_URL='http://38.58.59.103/openclash-editor/scan'; curl -fL --connect-timeout 20 --max-time 120 --retry 2 --show-error -o /tmp/openclash-editor-scan.sh "${BASE_URL}/install.sh"; }) && OPENCLASH_EDITOR_BASE_URL="$BASE_URL" OPENCLASH_EDITOR_RESOLVE_IP='38.58.59.103' sh /tmp/openclash-editor-scan.sh
 ```
 
 ### 中国大陆镜像（推荐）
@@ -71,13 +71,13 @@ rm -f /tmp/openclash-editor-scan.sh; BASE_URL='https://yy.yaml.uk:9443/openclash
 通过 VPS 镜像安装，安装完成后插件的版本检查和在线更新也会继续使用该镜像：
 
 ```sh
-curl -fL --connect-timeout 20 -o /tmp/openclash-editor-install.sh https://yy.yaml.uk:9443/openclash-editor/install.sh && sh /tmp/openclash-editor-install.sh
+curl -fL --connect-timeout 20 -o /tmp/openclash-editor-install.sh https://m.yaml.uk:9443/openclash-editor/install.sh && sh /tmp/openclash-editor-install.sh
 ```
 
 如果固件没有 `curl`：
 
 ```sh
-wget -T 20 -O /tmp/openclash-editor-install.sh https://yy.yaml.uk:9443/openclash-editor/install.sh && sh /tmp/openclash-editor-install.sh
+wget -T 20 -O /tmp/openclash-editor-install.sh https://m.yaml.uk:9443/openclash-editor/install.sh && sh /tmp/openclash-editor-install.sh
 ```
 
 安装器会优先使用 HTTPS，并依次尝试 `curl`、`wget`、`uclient-fetch`；如果旧版 OpenWrt 的 TLS 库不兼容或当地网络阻断 9443 端口，会自动回退到 HTTP 80 兼容通道。

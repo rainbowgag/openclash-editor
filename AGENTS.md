@@ -9,7 +9,7 @@ OpenWrt LuCI 里的 OpenClash 配置可视化编辑器：批量导入订阅节�
 - 前端：原生浏览器 JS（ES5、无框架、无构建，www/ 三个文件直接部署）
 - 部署/更新/门户：POSIX sh + procd + hotplug + nftables/iptables
 - 测试：Node（前端转换器单测）+ Ruby（后端单测，需在路由器或模拟环境）
-- 版本与发布：VERSION 文件；发布物为 tar.gz（scripts/release.sh），经 GitHub raw + 自建镜像（yy.yaml.uk）分发
+- 版本与发布：VERSION 文件；发布物为 tar.gz（scripts/release.sh），经 GitHub raw + 自建镜像（m.yaml.uk）分发
 
 ## 命令
 - 本地检查（Windows 开发机可用）：sh scripts/release.sh check（Node 单测 + 可用解释器的语法检查）

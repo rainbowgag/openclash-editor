@@ -2,9 +2,9 @@
 
 set -eu
 
-MIRROR_HOST="yy.yaml.uk"
+MIRROR_HOST="m.yaml.uk"
 MIRROR_PORT="9443"
-MIRROR_IP="${OPENCLASH_EDITOR_RESOLVE_IP:-103.27.78.68}"
+MIRROR_IP="${OPENCLASH_EDITOR_RESOLVE_IP:-38.58.59.103}"
 HTTPS_ROOT="https://${MIRROR_HOST}:${MIRROR_PORT}/openclash-editor"
 HTTP_ROOT="http://${MIRROR_IP}/openclash-editor"
 TEMPORARY="/tmp/openclash-editor-selected-install.sh"

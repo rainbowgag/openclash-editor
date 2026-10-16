@@ -11,7 +11,7 @@
 - 通过「预览 → 校验 → 备份 → 应用 → 重启 OpenClash」的安全流程修改 OpenClash 当前使用的 YAML 配置；
 - 额外提供「口令绑定」：为设备分配固定 IP 槽位，新设备扫码/输口令即绑定，portal 自动弹窗。
 
-安装形态：纯脚本文件直接铺到路由器（无编译、无架构二进制），发布物是 tar.gz，经 GitHub raw 或自建镜像（yy.yaml.uk）分发。
+安装形态：纯脚本文件直接铺到路由器（无编译、无架构二进制），发布物是 tar.gz，经 GitHub raw 或自建镜像（m.yaml.uk）分发。
 
 ## 2. 组件图
 
@@ -43,7 +43,7 @@ flowchart LR
 | openclash-editor-portal.init / .hotplug | procd 服务与 lan 接口 hotplug 触发器 |
 | install.sh / mirror-install.sh / uninstall.sh / update.sh | 安装、镜像安装、卸载、版本检查与在线更新 |
 | deploy/install-selector.sh | 镜像入口：让用户选择「口令绑定版(scan) / 手动绑定 IP 版(manual-ip)」后拉取对应通道安装脚本 |
-| deploy/yy.yaml.uk-openclash-editor.conf | 镜像服务器 nginx 站点配置（http 80 + https 9443） |
+| deploy/m.yaml.uk-openclash-editor.conf | 镜像服务器 nginx 站点配置（http 80 + https 9443） |
 | test_*.rb / test_*.js / test_*.sh | 后端/前端/门户的测试脚本（详见 §7） |
 | docs/、scripts/release.sh、AGENTS.md、HANDOFF.md | 项目记忆与开发工具 |
 
@@ -109,7 +109,7 @@ flowchart LR
 ## 9. 🔴 待明确事项（后续必须先定）
 
 1. **分支/发布策略**：当前 main 与 codex/qr-device-binding-test 同点；feature 分支如何并入 main、发布是否必须从 main、由谁 push。
-2. **镜像布局与发布自动化**：yy.yaml.uk 上 channel 目录的准确布局、SHA256SUMS 更新方式、是否脚本化一键上传。
+2. **镜像布局与发布自动化**：m.yaml.uk 上 channel 目录的准确布局、SHA256SUMS 更新方式、是否脚本化一键上传。
 3. **版本规则**：版本号递增规则（2.3.0 → 2.4.0?）、test/manual 通道与正式版关系；luci/view 里 ?v=2.2.9 这类缓存号必须与 VERSION 同步（目前滞后）。
 4. **测试环境**：是否搭建无真机的模拟环境（伪 OpenClash 配置 + stub uci/dhcp），还是继续以真机为主。
 5. **固件集成归属**：launch_ax6000_110m_build.py 目前在工作区根目录、未入库；是否纳入本仓库维护。
