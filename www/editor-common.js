@@ -61,7 +61,7 @@
   }
 
   var AIRPORT_GROUP_ORDER = ['HK','US','SG','TW','JP','OTHER'];
-  var AIRPORT_GROUP_NAMES = {'HK':'🇭🇰 香港中转','US':'🇺🇸 美国中转','SG':'🇸🇬 新加坡中转','TW':'🇹🇼 台湾中转','JP':'🇯🇵 日本中转','OTHER':'🌍 其他中转'};
+  var AIRPORT_GROUP_NAMES = {'HK':'🇭🇰 香港中转','US':'🇺🇸 美国中转','SG':'🇸🇬 新加坡中转','TW':'🇹🇼 台湾中转','JP':'🇯🇵 日本中转','OTHER':'中转代理组'};
 
   function countryTag(name) {
     var raw = String(name || ''), s = raw.toLowerCase();
@@ -81,9 +81,11 @@
       var tag = countryTag(node.name);
       (by[tag] = by[tag] || []).push(node.name);
     });
-    return AIRPORT_GROUP_ORDER.filter(function(tag) { return by[tag] && by[tag].length; }).map(function(tag) {
+    var groups = AIRPORT_GROUP_ORDER.filter(function(tag) { return by[tag] && by[tag].length; }).map(function(tag) {
       return { name: airportGroupName(tag), type: 'url-test', proxies: by[tag] };
     });
+    groups.push({ name: '节点选择代理组', type: 'select', proxies: (nodes || []).map(function(node) { return node.name; }) });
+    return groups;
   }
 
   function recalculateNextIp(draft) {

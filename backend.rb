@@ -1925,15 +1925,19 @@ def sub_fetch_response(url)
 end
 
 def airport_group_yaml(group)
-  {
+  type = group["type"].to_s == "select" ? "select" : "url-test"
+  output = {
     "name" => group["name"].to_s.strip,
-    "type" => "url-test",
-    "url" => "http://www.gstatic.com/generate_204",
-    "interval" => 300,
-    "tolerance" => 50,
-    "lazy" => true,
+    "type" => type,
     "proxies" => Array(group["proxies"]).map(&:to_s)
   }
+  unless type == "select"
+    output["url"] = "http://www.gstatic.com/generate_204"
+    output["interval"] = 300
+    output["tolerance"] = 50
+    output["lazy"] = true
+  end
+  output
 end
 
 def replace_airport_groups(lines, groups)
