@@ -1786,6 +1786,7 @@ def state_response
     "nodes" => nodes,
     "rules" => rules,
     "slots" => read_slots,
+    "groups" => airport_groups_from_lines(File.read(SOURCE).gsub("\r\n", "\n").split("\n", -1)),
     "start_ip" => start_ip,
     "next_ip" => first_available_ip(rules, active_network, start_ip),
     "network_cidr" => active_network["cidr"],
@@ -1879,6 +1880,110 @@ def replace_device_rules(lines, rules)
   lines[header...finish] = replacement
 end
 
+AIRPORT_BEGIN_MARKER = "# OPENCLASH-EDITOR:AIRPORT:BEGIN"
+AIRPORT_END_MARKER = "# OPENCLASH-EDITOR:AIRPORT:END"
+
+def fetch_subscription(url)
+  url = url.to_s.strip
+  raise "请输入订阅地址" if url.empty?
+  raise "订阅地址必须是 http(s) 链接" unless url.match?(%r{\Ahttps?://}i)
+  content = IO.popen(["curl", "-4", "--noproxy", "*", "-fL", "--connect-timeout", "15", "--max-time", "60", "--retry", "1", "--show-error", "--silent", url]) { |io| io.read }.to_s.strip
+  raise "订阅拉取失败，请检查订阅地址和路由器本地网络" if content.empty?
+  content
+end
+
+def decode_base64_text(text)
+  stripped = text.to_s.strip
+  return nil if stripped.length < 8
+  normalized = stripped.tr('-_', '+/')
+  normalized += '=' * ((4 - normalized.length % 4) % 4) if normalized.length % 4 != 0
+  decoded = normalized.unpack1("m0") rescue nil
+  return nil if decoded.nil?
+  decoded = decoded.force_encoding("UTF-8")
+  decoded.valid_encoding? ? decoded : nil
+end
+
+def sub_fetch_response(url)
+  content = fetch_subscription(url)
+  candidates = [content]
+  decoded = decode_base64_text(content)
+  candidates << decoded if decoded && decoded != content
+  candidates.uniq!
+  yaml_candidate = candidates.find do |candidate|
+    candidate.match?(/^[ \t]*proxies\s*:/) || candidate.match?(/\n[ \t]*proxies\s*:/)
+  end
+  if yaml_candidate
+    data = YAML.safe_load(yaml_candidate, aliases: true) || {}
+    nodes = Array(data["proxies"]).select { |node| node.is_a?(Hash) && !node["name"].to_s.strip.empty? }
+    nodes = nodes.map { |node| ordered_node(node) }
+    nodes.each { |node| node["name"] = node["name"].to_s.strip }
+    { "ok" => true, "format" => "yaml", "nodes" => nodes }
+  else
+    links = candidates.find { |candidate| candidate.match?(%r{[a-z0-9+]+://}i) } || content
+    { "ok" => true, "format" => "links", "raw" => links }
+  end
+end
+
+def airport_group_yaml(group)
+  {
+    "name" => group["name"].to_s.strip,
+    "type" => "url-test",
+    "url" => "http://www.gstatic.com/generate_204",
+    "interval" => 300,
+    "tolerance" => 50,
+    "lazy" => true,
+    "proxies" => Array(group["proxies"]).map(&:to_s)
+  }
+end
+
+def replace_airport_groups(lines, groups)
+  groups = Array(groups).select { |group| group.is_a?(Hash) && !group["name"].to_s.strip.empty? }
+  header = lines.index { |line| line.match?(/^proxy-groups:\s*/) }
+
+  if header.nil?
+    return if groups.empty?
+    lines << "" unless lines.empty? && lines.last.to_s.empty?
+    lines << "proxy-groups:"
+    lines << "  #{AIRPORT_BEGIN_MARKER}"
+    groups.each { |group| lines << "  - #{inline_yaml(airport_group_yaml(group))}" }
+    lines << "  #{AIRPORT_END_MARKER}"
+    return
+  end
+
+  finish = (header + 1...lines.length).find { |index| lines[index].match?(/^[A-Za-z0-9_-]+:\s*/) } || lines.length
+  body = lines[(header + 1)...finish]
+  begin_idx = body.index { |line| line.strip == AIRPORT_BEGIN_MARKER }
+  end_idx = body.index { |line| line.strip == AIRPORT_END_MARKER }
+  if begin_idx && end_idx && end_idx > begin_idx
+    body = body[0...begin_idx] + body[(end_idx + 1)..-1]
+  end
+
+  replacement = ["proxy-groups:"]
+  unless groups.empty?
+    replacement << "  #{AIRPORT_BEGIN_MARKER}"
+    groups.each { |group| replacement << "  - #{inline_yaml(airport_group_yaml(group))}" }
+    replacement << "  #{AIRPORT_END_MARKER}"
+  end
+  replacement.concat(body)
+  lines[header...finish] = replacement
+end
+
+def airport_groups_from_lines(lines)
+  start_index = lines.index { |line| line.strip == AIRPORT_BEGIN_MARKER }
+  return [] unless start_index
+  end_index = lines.index { |line| line.strip == AIRPORT_END_MARKER }
+  return [] unless end_index && end_index > start_index
+  block = "proxy-groups:\n" + lines[(start_index + 1)...end_index].join("\n")
+  parsed = YAML.safe_load(block, aliases: true) rescue nil
+  Array(parsed && parsed["proxy-groups"]).select { |group| group.is_a?(Hash) }.map do |group|
+    {
+      "name" => group["name"].to_s,
+      "type" => group["type"].to_s,
+      "proxies" => Array(group["proxies"]).map(&:to_s)
+    }
+  end
+end
+
 def normalize_preview_slots(requested_slots, node_names, rules)
   raise "扫码槽位数据必须是数组" unless requested_slots.is_a?(Array)
   raise "扫码槽位数量超过上限" if requested_slots.length > 4096
@@ -1958,6 +2063,7 @@ def preview_response(request_path)
   nodes = request.fetch("nodes")
   rules = request.fetch("rules")
   anchor_names = request.fetch("anchor_names")
+  groups = request["groups"].is_a?(Array) ? request["groups"] : []
   network = cidr_info(request.fetch("network_cidr"))
   start_ip = request.fetch("start_ip").to_s
   manual_network = request["manual_network"] == true
@@ -1991,6 +2097,13 @@ def preview_response(request_path)
   missing_anchor_names = anchor_names.reject { |name| names.include?(name) }
   raise "pr 引用了不存在的节点：#{missing_anchor_names.join(', ')}" unless missing_anchor_names.empty?
   raise "pr 节点名称重复" unless anchor_names.uniq.length == anchor_names.length
+  groups.each do |group|
+    raise "机场代理组数据格式错误" unless group.is_a?(Hash)
+    group_name = group["name"].to_s.strip
+    raise "机场代理组名称不能为空" if group_name.empty?
+    missing = Array(group["proxies"]).map(&:to_s) - names
+    raise "机场代理组 #{group_name} 引用了不存在的节点：#{missing.join(', ')}" unless missing.empty?
+  end
 
   seen_rule_ips = {}
   rules.each do |rule|
@@ -2008,6 +2121,12 @@ def preview_response(request_path)
 
   current_config = load_config
   diff = change_summary(current_config, nodes, rules, anchor_names)
+  current_airport_groups = airport_groups_from_lines(File.read(SOURCE).gsub("\r\n", "\n").split("\n", -1))
+  current_group_names = current_airport_groups.map { |group| group["name"] }.to_h { |name| [name, true] }
+  desired_group_names = groups.map { |group| group["name"].to_s.strip }
+  added_groups = desired_group_names.reject { |name| current_group_names[name] }
+  removed_groups = current_airport_groups.map { |group| group["name"] }.reject { |name| desired_group_names.include?(name) }
+  diff = "#{diff}\n机场代理组：新增 #{added_groups.length}，删除 #{removed_groups.length}" unless added_groups.empty? && removed_groups.empty?
   current_slots = read_slots
   current_by_id = current_slots.to_h { |slot| [slot["id"].to_s, slot] }
   desired_by_id = slots.to_h { |slot| [slot["id"].to_s, slot] }
@@ -2020,6 +2139,7 @@ def preview_response(request_path)
   lines = File.read(SOURCE).gsub("\r\n", "\n").split("\n", -1)
   replace_anchor_names(lines, anchor_names)
   replace_nodes(lines, nodes)
+  replace_airport_groups(lines, groups)
   replace_device_rules(lines, rules.map(&:to_s))
   generated = lines.join("\n")
   parsed = YAML.safe_load(generated, aliases: true)
@@ -2048,6 +2168,7 @@ if __FILE__ == $PROGRAM_NAME
   begin
     result = case ARGV[0]
              when "state" then state_response
+             when "sub-fetch" then sub_fetch_response(ARGV.fetch(1))
              when "preview" then preview_response(ARGV.fetch(1))
              when "reset" then reset_response
              when "qr-create" then qr_create_response(ARGV.fetch(1), ARGV[2] == "1")

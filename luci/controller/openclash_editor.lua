@@ -126,6 +126,7 @@ function index()
 	entry({"admin", "services", "openclash", "visual-editor-reset"}, call("action_reset")).leaf = true
 	entry({"admin", "services", "openclash", "visual-editor-update-check"}, call("action_update_check")).leaf = true
 	entry({"admin", "services", "openclash", "visual-editor-update"}, call("action_update")).leaf = true
+	entry({"admin", "services", "openclash", "visual-editor-sub-fetch"}, call("action_sub_fetch")).leaf = true
 	entry({"admin", "services", "openclash", "visual-editor-slots-list"}, call("action_slots_list")).leaf = true
 	entry({"admin", "services", "openclash", "visual-editor-slots-create"}, call("action_slots_create")).leaf = true
 	entry({"admin", "services", "openclash", "visual-editor-slots-create-many"}, call("action_slots_create_many")).leaf = true
@@ -202,6 +203,21 @@ end
 function action_state()
 	local ok, err = xpcall(state_impl, debug.traceback)
 	if not ok then reply(false, { error = "读取配置失败", details = err }) end
+	flush_reply()
+end
+
+function action_sub_fetch()
+	if not require_post() then return flush_reply() end
+	local ok, err = xpcall(function()
+		local url = http.formvalue("url") or ""
+		if #url == 0 then return reply(false, { error = "请输入订阅地址" }) end
+		if #url > 8192 then return reply(false, { error = "订阅地址过长" }) end
+		local result, backend_err, details = run_backend("sub-fetch " .. shellquote(url))
+		if not result then return reply(false, { error = backend_err, details = details }) end
+		if not result.ok then return reply(false, result) end
+		reply(true, result)
+	end, debug.traceback)
+	if not ok then reply(false, { error = "拉取订阅失败", details = err }) end
 	flush_reply()
 end
 

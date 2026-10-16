@@ -60,6 +60,32 @@
     });
   }
 
+  var AIRPORT_GROUP_ORDER = ['HK','US','SG','TW','JP','OTHER'];
+  var AIRPORT_GROUP_NAMES = {'HK':'🇭🇰 香港中转','US':'🇺🇸 美国中转','SG':'🇸🇬 新加坡中转','TW':'🇹🇼 台湾中转','JP':'🇯🇵 日本中转','OTHER':'🌍 其他中转'};
+
+  function countryTag(name) {
+    var raw = String(name || ''), s = raw.toLowerCase();
+    if (raw.indexOf('\uD83C\uDDED\uD83C\uDDF0') >= 0 || /香港|hong\s?kong|\bhk\b|\bhk[-_0-9]/i.test(s)) return 'HK';
+    if (raw.indexOf('\uD83C\uDDFA\uD83C\uDDF8') >= 0 || /美国|洛杉矶|纽约|圣何塞|硅谷|\bus\b|\busa\b|united states/i.test(s)) return 'US';
+    if (raw.indexOf('\uD83C\uDDF8\uD83C\uDDEC') >= 0 || /新加坡|狮城|\bsg\b|singapore/i.test(s)) return 'SG';
+    if (raw.indexOf('\uD83C\uDDF9\uD83C\uDDFC') >= 0 || /台湾|台北|\btw\b|taiwan/i.test(s)) return 'TW';
+    if (raw.indexOf('\uD83C\uDDEF\uD83C\uDDF5') >= 0 || /日本|东京|大阪|\bjp\b|japan/i.test(s)) return 'JP';
+    return 'OTHER';
+  }
+
+  function airportGroupName(tag) { return AIRPORT_GROUP_NAMES[tag] || AIRPORT_GROUP_NAMES.OTHER; }
+
+  function buildAirportGroups(nodes) {
+    var by = {};
+    (nodes || []).forEach(function(node) {
+      var tag = countryTag(node.name);
+      (by[tag] = by[tag] || []).push(node.name);
+    });
+    return AIRPORT_GROUP_ORDER.filter(function(tag) { return by[tag] && by[tag].length; }).map(function(tag) {
+      return { name: airportGroupName(tag), type: 'url-test', proxies: by[tag] };
+    });
+  }
+
   function recalculateNextIp(draft) {
     var info = cidrInfo(draft.network_cidr), start = ipToInt(draft.start_ip);
     if (!info || start === null || start < info.first || start > info.last) { draft.next_ip = ''; return ''; }
@@ -119,6 +145,7 @@
       gateway_ip: state.gateway_ip || '',
       dhcp_pool_start: state.dhcp_pool_start || '',
       dhcp_pool_end: state.dhcp_pool_end || '',
+      groups: state.groups || [],
       manual_network: !!state.manual_network,
       start_ip: state.start_ip,
       next_ip: state.next_ip || '',
@@ -150,6 +177,7 @@
         stored.gateway_ip = state.gateway_ip || '';
         stored.dhcp_pool_start = state.dhcp_pool_start || '';
         stored.dhcp_pool_end = state.dhcp_pool_end || '';
+        stored.groups = state.groups || [];
         stored.detection_source = state.detection_source;
         stored.detection_error = state.detection_error;
         if (!stored.manual_network) {
@@ -177,6 +205,7 @@
     recalculateNextIp: recalculateNextIp,
     ipToInt: ipToInt, intToIp: intToIp, cidrInfo: cidrInfo,
     ruleParts: ruleParts, numberNodes: numberNodes,
+    countryTag: countryTag, airportGroupName: airportGroupName, buildAirportGroups: buildAirportGroups,
     removeNodes: removeNodes, removeRulesByIps: removeRulesByIps, esc: esc
   };
 })(window);
