@@ -842,6 +842,10 @@ end
 def dhcp_dynamic_range(network)
   raw_start = `uci -q get dhcp.lan.start 2>/dev/null`.strip
   raw_limit = `uci -q get dhcp.lan.limit 2>/dev/null`.strip
+  if raw_limit.empty?
+    raw_start = `uci -q get dhcp.@dnsmasq[0].start 2>/dev/null`.strip
+    raw_limit = `uci -q get dhcp.@dnsmasq[0].limit 2>/dev/null`.strip
+  end
   return nil unless raw_limit.match?(/\A\d+\z/) && raw_limit.to_i.positive?
   start_i = if raw_start.include?(".")
               ipv4_to_i(raw_start)
@@ -1719,8 +1723,17 @@ def first_available_ip(rules, network, start_ip)
     nil
   end
   gateway_i = ipv4_to_i(network["gateway"]) unless network["gateway"].to_s.empty?
+  pool = dhcp_dynamic_range(network)
   candidate = ipv4_to_i(start_ip)
-  candidate += 1 while candidate <= network["last_i"] && (used[candidate] || gateway_i == candidate)
+  while candidate <= network["last_i"]
+    if used[candidate] || gateway_i == candidate
+      candidate += 1
+    elsif pool && candidate >= pool[0] && candidate <= pool[1]
+      candidate = pool[1] + 1
+    else
+      break
+    end
+  end
   candidate <= network["last_i"] ? i_to_ipv4(candidate) : ""
 end
 
@@ -1767,6 +1780,7 @@ def state_response
     }
   end
   rules = device_rules(config)
+  dynamic_range = dhcp_dynamic_range(active_network)
   {
     "ok" => true,
     "nodes" => nodes,
@@ -1780,6 +1794,8 @@ def state_response
     "manual_network" => manual_network,
     "detected_lan_cidr" => detected_lan["cidr"],
     "gateway_ip" => detected_lan["gateway"],
+    "dhcp_pool_start" => dynamic_range ? i_to_ipv4(dynamic_range[0]) : "",
+    "dhcp_pool_end" => dynamic_range ? i_to_ipv4(dynamic_range[1]) : "",
     "detection_source" => detected_lan["source"],
     "detection_error" => detected_lan["error"],
     "architecture" => system_architecture,
@@ -1880,6 +1896,7 @@ def normalize_preview_slots(requested_slots, node_names, rules)
   seen_codes = {}
   seen_names = {}
   seen_ips = {}
+  dhcp_sections = dhcp_host_sections
   requested_slots.map do |raw|
     raise "扫码槽位数据格式错误" unless raw.is_a?(Hash)
     id = slot_id!(raw["id"])
@@ -1896,7 +1913,23 @@ def normalize_preview_slots(requested_slots, node_names, rules)
     raise "扫码槽位引用了不存在的节点：#{node_name}" unless node_names.include?(node_name) || (id == DIRECT_SLOT_ID && node_name == DIRECT_NODE)
     raise "扫码槽位 IP 不在当前 LAN 网段：#{address}" unless value.between?(network["first_i"], network["last_i"])
     raise "扫码槽位不能使用路由器自身地址：#{address}" if address == lan["gateway"]
+    dynamic_range = dhcp_dynamic_range(network)
+    if dynamic_range && value.between?(dynamic_range[0], dynamic_range[1])
+      if id == DIRECT_SLOT_ID
+        raise "直连槽位固定地址 #{address} 位于 DHCP 动态分配池内，请先调整路由器 DHCP 地址池"
+      else
+        raise "扫码槽位固定地址 #{address} 位于 DHCP 动态分配池（#{i_to_ipv4(dynamic_range[0])}~#{i_to_ipv4(dynamic_range[1])}）内，请更换为池外地址"
+      end
+    end
     raise "扫码槽位缺少对应设备规则：#{address}/32 → #{node_name}" unless rules_by_ip[address].to_s == node_name
+    dhcp_sections.each do |section, values|
+      next if section == "oce_slot_#{id}"
+      next unless values["ip"].to_s == address
+      next if values["mac"].to_s.empty?
+      bound_mac = existing ? existing["mac"].to_s.downcase : ""
+      next if !bound_mac.empty? && values["mac"].to_s.downcase == bound_mac
+      raise "扫码槽位固定地址 #{address} 已被其他 DHCP 静态租约占用（MAC #{values["mac"]}）"
+    end
     raise "扫码槽位编号重复：#{id}" if seen_ids[id]
     raise "扫码槽位二维码重复" if seen_tokens[token]
     raise "槽位口令重复：#{code}" if seen_codes[code]

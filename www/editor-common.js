@@ -72,7 +72,12 @@
       var value = ipToInt(slot.ip);
       if (value !== null) used[value] = true;
     });
-    while (start <= info.last && (used[start] || start === gateway)) start++;
+    var poolStart = ipToInt(draft.dhcp_pool_start), poolEnd = ipToInt(draft.dhcp_pool_end);
+    while (start <= info.last) {
+      if (used[start] || start === gateway) { start++; continue; }
+      if (poolStart !== null && poolEnd !== null && start >= poolStart && start <= poolEnd) { start = poolEnd + 1; continue; }
+      break;
+    }
     draft.next_ip = start <= info.last ? intToIp(start) : '';
     return draft.next_ip;
   }
@@ -112,6 +117,8 @@
       network_cidr: state.network_cidr,
       detected_lan_cidr: state.detected_lan_cidr,
       gateway_ip: state.gateway_ip || '',
+      dhcp_pool_start: state.dhcp_pool_start || '',
+      dhcp_pool_end: state.dhcp_pool_end || '',
       manual_network: !!state.manual_network,
       start_ip: state.start_ip,
       next_ip: state.next_ip || '',
@@ -141,6 +148,8 @@
         stored.architecture = state.architecture || stored.architecture || 'unknown';
         stored.detected_lan_cidr = state.detected_lan_cidr;
         stored.gateway_ip = state.gateway_ip || '';
+        stored.dhcp_pool_start = state.dhcp_pool_start || '';
+        stored.dhcp_pool_end = state.dhcp_pool_end || '';
         stored.detection_source = state.detection_source;
         stored.detection_error = state.detection_error;
         if (!stored.manual_network) {
