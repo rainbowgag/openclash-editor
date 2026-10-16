@@ -52,7 +52,7 @@ fetch_file() {
   if command -v curl >/dev/null 2>&1; then
     if [ -n "$RESOLVE_IP" ]; then
       curl -fL --connect-timeout 20 --max-time 120 --retry 2 --show-error --silent \
-        --resolve "yy.yaml.uk:9443:${RESOLVE_IP}" "$url" -o "$temporary"
+        --resolve "m.yaml.uk:9443:${RESOLVE_IP}" "$url" -o "$temporary"
     else
       curl -fL --connect-timeout 20 --max-time 120 --retry 2 --show-error --silent "$url" -o "$temporary"
     fi
