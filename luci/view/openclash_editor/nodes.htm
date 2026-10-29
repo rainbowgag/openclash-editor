@@ -65,29 +65,75 @@
   function visibleNodeNames(){var query=(el('node_search').value||'').trim().toLowerCase();return draft.nodes.filter(function(n){return !query||String(n.name).toLowerCase().indexOf(query)>=0}).map(function(n){return n.name})}
   function syncNodeSelection(){var names=visibleNodeNames(),selected=names.filter(function(name){return selectedNodes[name]}).length,total=Object.keys(selectedNodes).filter(function(name){return draft.nodes.some(function(n){return n.name===name})}).length,control=el('node_select_all');control.disabled=names.length===0;control.checked=names.length>0&&selected===names.length;control.indeterminate=selected>0&&selected<names.length;el('node_bulk_delete').disabled=total===0;el('node_bulk_delete').textContent='批量删除（'+total+'）'}
   function render(){var old=[],fresh=[],query=(el('node_search').value||'').trim().toLowerCase(),valid=Object.create(null);draft.nodes.forEach(function(n){valid[n.name]=true});Object.keys(selectedNodes).forEach(function(name){if(!valid[name])delete selectedNodes[name]});draft.nodes.forEach(function(n,i){if(query&&String(n.name).toLowerCase().indexOf(query)<0)return;(changed(n)?fresh:old).push(nodeRow(n,i))});var shown=old.length+fresh.length;el('node_count').textContent=query?'显示 '+shown+' / '+draft.nodes.length:draft.nodes.length+' 个';el('existing_count').textContent='（'+old.length+'）';el('existing_body').innerHTML=old.join('')||'<tr><td colspan="6" class="oce-empty">'+(query?'没有匹配的已应用节点':'没有已应用节点')+'</td></tr>';el('new_body').innerHTML=fresh.join('')||'<tr><td colspan="6" class="oce-empty">'+(query?'没有匹配的新增或修改节点':'本次还没有新增或修改节点')+'</td></tr>';if(query&&old.length)el('existing_nodes_details').open=true;syncNodeSelection();refreshDialerBatch();E.saveDraft(draft)}
+  function replaceExistingNode(n){
+    var existing=null;
+    draft.nodes.forEach(function(x){if(x.name===n.name)existing=x});
+    if(!existing)return false;
+    var dialer=(existing.data&&existing.data['dialer-proxy'])||'';
+    existing.type=String(n.type||'');
+    existing.server=String(n.server||'');
+    existing.port=n.port;
+    existing.data=n;
+    if(dialer)existing.data['dialer-proxy']=dialer;
+    existing._edited=true;
+    return true;
+  }
   function importNodes(){
     var out=OpenClashConverter.convert(el('links').value,''),renameEnabled=el('bulk_rename_enabled').checked;
     if(renameEnabled&&out.nodes.length&&!bulkRename.configured){openBulkRename();msg('请先设置批量节点名称和起始数','warn');return}
     if(renameEnabled)E.numberNodes(out.nodes,bulkRename.prefix,bulkRename.start);
-    var accepted=[],skipped=[],slotCodesByName=Object.create(null);
-    out.nodes.forEach(function(n,index){if(/[,\r\n]/.test(n.name))out.errors.push('节点名称不能包含逗号或换行：'+n.name);else if(exists(n.name)||accepted.some(function(x){return x.name===n.name}))skipped.push(n.name);else{accepted.push(n);slotCodesByName[n.name]=(out.slot_codes&&out.slot_codes[index])||[]}});
-    if(!accepted.length){msg(out.errors.concat(skipped.map(function(x){return'同名节点已存在：'+x})).join('\n')||'没有可添加的节点','error');return}
+    var accepted=[],replaced=[],skipped=[],cancelled=[],slotCodesByName=Object.create(null),replaceSlotRequests=[];
+    out.nodes.forEach(function(n,index){
+      if(/[,\r\n]/.test(n.name)){out.errors.push('节点名称不能包含逗号或换行：'+n.name);return}
+      var codes=(out.slot_codes&&out.slot_codes[index])||[];
+      if(exists(n.name)){
+        if(confirm('已有同名节点“'+n.name+'”在节点列表中，是否要替换？\n\n确定：用新链接替换该节点\n取消：更改名称后添加')){
+          replaceExistingNode(n);replaced.push(n.name);
+          if(codes.length)codes.forEach(function(code){replaceSlotRequests.push({node:n.name,code:code})});
+        }else{
+          var newName=prompt('节点“'+n.name+'”与列表中已有节点同名。\n请输入新的节点名称后添加；点击“取消”则不添加该节点。',n.name),hint;
+          if(newName===null){cancelled.push(n.name);return}
+          newName=newName.trim();
+          while(!newName||/[,\r\n]/.test(newName)||exists(newName)||accepted.some(function(x){return x.name===newName})){
+            hint=!newName||/[,\r\n]/.test(newName)?'节点名称不能为空，也不能包含逗号或换行，请重新输入：':'节点名称已存在：“'+newName+'”，请重新输入：';
+            newName=prompt(hint,'');
+            if(newName===null){cancelled.push(n.name);return}
+            newName=newName.trim();
+          }
+          n.name=newName;accepted.push(n);slotCodesByName[newName]=codes;
+        }
+        return;
+      }
+      if(accepted.some(function(x){return x.name===n.name})){skipped.push(n.name);return}
+      accepted.push(n);slotCodesByName[n.name]=codes;
+    });
+    if(!accepted.length&&!replaced.length){
+      var failNotes=out.errors.concat(skipped.map(function(x){return'本次链接中重复的节点名称：'+x}),cancelled.map(function(x){return'已取消添加：'+x}));
+      msg(failNotes.join('\n')||'没有可添加的节点','error');return
+    }
     var addFirstToRouter=el('add_to_pr').checked,autoSlots=el('auto_create_slots').checked,button=el('import_btn');
     accepted.forEach(function(n,index){draft.nodes.push({name:String(n.name),type:String(n.type||''),server:String(n.server||''),port:n.port,in_pr:addFirstToRouter&&index===0,data:n})});
     draft.selected_node_names=accepted.map(function(n){return n.name});
     ensureRouterProxy();
     el('add_to_pr').checked=!hasRouterProxy();
     render();
-    var importedCodeCount=accepted.reduce(function(total,n){return total+(slotCodesByName[n.name]||[]).length},0);
-    var notes=['已添加 '+accepted.length+' 个节点',addFirstToRouter?'首个节点已设为路由器代理节点':'已确保至少一个路由器代理节点'];
+    var acceptedCodeCount=accepted.reduce(function(total,n){return total+(slotCodesByName[n.name]||[]).length},0);
+    var importedCodeCount=acceptedCodeCount+replaceSlotRequests.length;
+    var notes=[];
+    if(accepted.length)notes.push('已添加 '+accepted.length+' 个节点');
+    if(replaced.length)notes.push('已替换 '+replaced.length+' 个同名节点');
+    notes.push(addFirstToRouter&&accepted.length?'首个节点已设为路由器代理节点':'已确保至少一个路由器代理节点');
     if(importedCodeCount)notes.push('检测到 '+importedCodeCount+' 个自定义口令');
-    if(renameEnabled)notes.push('批量命名：'+accepted[0].name+(accepted.length>1?' ～ '+accepted[accepted.length-1].name:''));
-    if(skipped.length)notes.push('跳过同名节点：'+skipped.join('、'));
+    if(renameEnabled&&accepted.length)notes.push('批量命名：'+accepted[0].name+(accepted.length>1?' ～ '+accepted[accepted.length-1].name:''));
+    if(skipped.length)notes.push('跳过本次链接中重复的节点名称：'+skipped.join('、'));
+    if(cancelled.length)notes.push('已取消添加节点：'+cancelled.join('、'));
     if(out.errors.length)notes.push(out.errors.join('\n'));
-    if(!autoSlots){notes.push(importedCodeCount?'未勾选自动创建口令槽位，自定义口令未导入':'未自动创建口令槽位');msg(notes.join('\n'),importedCodeCount||skipped.length||out.errors.length?'warn':'ok');return}
-    button.disabled=true;
+    if(!autoSlots){notes.push(importedCodeCount?'未勾选自动创建口令槽位，自定义口令未导入':'未自动创建口令槽位');msg(notes.join('\n'),importedCodeCount||skipped.length||cancelled.length||out.errors.length?'warn':'ok');return}
     var slotRequests=[];
     accepted.forEach(function(n){var codes=slotCodesByName[n.name]||[];if(codes.length)codes.forEach(function(code){slotRequests.push({node:n.name,code:code})});else slotRequests.push({node:n.name,code:''})});
+    slotRequests=slotRequests.concat(replaceSlotRequests);
+    if(!slotRequests.length){msg(notes.join('\n'),skipped.length||cancelled.length||out.errors.length?'warn':'ok');return}
+    button.disabled=true;
     var payload={
       nodes:accepted.map(function(n){return n.name}),
       slot_requests:slotRequests,
@@ -98,7 +144,7 @@
     E.post(urls.slotsPlan,{payload:JSON.stringify(payload)}).then(function(result){
       if(!result.ok)throw new Error(result.error+(result.details?'\n'+result.details:''));
       (result.created||[]).forEach(function(slot){draft.slots.push(slot);draft.rules.push('SRC-IP-CIDR,'+slot.ip+'/32,'+slot.node)});
-      render();notes.push('已排队创建 '+result.created_count+' 个扫码槽位，应用正式配置后生效');msg(notes.join('\n'),skipped.length||out.errors.length?'warn':'ok');
+      render();notes.push('已排队创建 '+result.created_count+' 个扫码槽位，应用正式配置后生效');msg(notes.join('\n'),skipped.length||cancelled.length||out.errors.length?'warn':'ok');
     }).catch(function(error){
       notes.push('节点已加入，但自动创建扫码槽位失败：'+error.message);msg(notes.join('\n'),'warn');
     }).then(function(){button.disabled=false});
