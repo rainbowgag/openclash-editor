@@ -24,4 +24,10 @@ abort "allocation should choose first gap" unless first_available_ip(rules, netw
 rules.delete_at(0)
 abort "deleted address should be reused" unless first_available_ip(rules, network, "192.168.101.2") == "192.168.101.2"
 
+full_pool_network = cidr_info("192.168.1.0/24").merge("gateway" => "192.168.1.1")
+full_pool_used = { ipv4_to_i("192.168.1.254") => true }
+full_pool = [ipv4_to_i("192.168.1.2"), ipv4_to_i("192.168.1.253")]
+abort "full DHCP pool should leave no outside address" unless next_free_ip(ipv4_to_i("192.168.1.2"), full_pool_used, ipv4_to_i("192.168.1.1"), full_pool, full_pool_network).nil?
+abort "fallback should reuse an address inside the DHCP pool" unless next_free_ip(ipv4_to_i("192.168.1.2"), full_pool_used, ipv4_to_i("192.168.1.1"), nil, full_pool_network) == ipv4_to_i("192.168.1.2")
+
 puts "NETWORK_CALCULATION_OK #{cases.length} subnets, rule IP recycling OK"

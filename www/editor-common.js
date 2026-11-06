@@ -100,13 +100,22 @@
       var value = ipToInt(slot.ip);
       if (value !== null) used[value] = true;
     });
+    (draft.reserved_ips || []).forEach(function(address) {
+      var value = ipToInt(String(address || '').replace(/\/32$/, ''));
+      if (value !== null) used[value] = true;
+    });
     var poolStart = ipToInt(draft.dhcp_pool_start), poolEnd = ipToInt(draft.dhcp_pool_end);
-    while (start <= info.last) {
-      if (used[start] || start === gateway) { start++; continue; }
-      if (poolStart !== null && poolEnd !== null && start >= poolStart && start <= poolEnd) { start = poolEnd + 1; continue; }
-      break;
+    function nextFree(candidate, activePoolStart, activePoolEnd) {
+      while (candidate <= info.last) {
+        if (used[candidate] || candidate === gateway) { candidate++; continue; }
+        if (activePoolStart !== null && activePoolEnd !== null && candidate >= activePoolStart && candidate <= activePoolEnd) { candidate = activePoolEnd + 1; continue; }
+        return candidate;
+      }
+      return null;
     }
-    draft.next_ip = start <= info.last ? intToIp(start) : '';
+    var candidate = nextFree(start, poolStart, poolEnd);
+    if (candidate === null && poolStart !== null && poolEnd !== null) candidate = nextFree(start, null, null);
+    draft.next_ip = candidate === null ? '' : intToIp(candidate);
     return draft.next_ip;
   }
 
@@ -147,6 +156,7 @@
       gateway_ip: state.gateway_ip || '',
       dhcp_pool_start: state.dhcp_pool_start || '',
       dhcp_pool_end: state.dhcp_pool_end || '',
+      reserved_ips: state.reserved_ips || [],
       groups: state.groups || [],
       manual_network: !!state.manual_network,
       start_ip: state.start_ip,
@@ -179,6 +189,7 @@
         stored.gateway_ip = state.gateway_ip || '';
         stored.dhcp_pool_start = state.dhcp_pool_start || '';
         stored.dhcp_pool_end = state.dhcp_pool_end || '';
+        stored.reserved_ips = state.reserved_ips || [];
         stored.groups = state.groups || [];
         stored.detection_source = state.detection_source;
         stored.detection_error = state.detection_error;

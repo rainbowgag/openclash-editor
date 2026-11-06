@@ -538,6 +538,27 @@ def active_dhcp_leases
   leases
 end
 
+def dhcp_reserved_ips
+  reserved = {}
+  dhcp_host_sections.each_value do |values|
+    address = values["ip"].to_s
+    next if address.empty?
+    begin
+      reserved[ipv4_to_i(address)] = true
+    rescue StandardError
+      nil
+    end
+  end
+  active_dhcp_leases.each do |lease|
+    begin
+      reserved[ipv4_to_i(lease["ip"])] = true
+    rescue StandardError
+      nil
+    end
+  end
+  reserved.keys.map { |value| i_to_ipv4(value) }
+end
+
 def purge_dhcp_lease(mac, address = "")
   normalized_mac = mac.to_s.downcase
   raise "无效的设备 MAC 地址" unless normalized_mac.match?(/\A[0-9a-f]{2}(?::[0-9a-f]{2}){5}\z/)
@@ -1710,31 +1731,59 @@ def change_summary(config, nodes, rules, anchor_names)
   lines.join("\n")
 end
 
-def first_available_ip(rules, network, start_ip)
-  used = rules.filter_map do |rule|
+def first_available_ip(rules, network, start_ip, additional_ips = [])
+  used = {}
+  rules.each do |rule|
     parts = rule_parts(rule)
     next unless parts
     value = ipv4_to_i(parts["ip"])
-    value if value.between?(network["first_i"], network["last_i"])
-  end.to_h { |value| [value, true] }
-  begin
-    used[ipv4_to_i(direct_slot_ip)] = true
+    used[value] = true if value.between?(network["first_i"], network["last_i"])
   rescue StandardError
     nil
+  end
+  read_slots.each do |slot|
+    begin
+      value = ipv4_to_i(slot["ip"])
+      used[value] = true if value.between?(network["first_i"], network["last_i"])
+    rescue StandardError
+      nil
+    end
+  end
+  begin
+    value = ipv4_to_i(direct_slot_ip)
+    used[value] = true if value.between?(network["first_i"], network["last_i"])
+  rescue StandardError
+    nil
+  end
+  Array(additional_ips).each do |address|
+    begin
+      value = ipv4_to_i(address.to_s.sub(%r{/32\z}, ""))
+      used[value] = true if value.between?(network["first_i"], network["last_i"])
+    rescue StandardError
+      nil
+    end
   end
   gateway_i = ipv4_to_i(network["gateway"]) unless network["gateway"].to_s.empty?
   pool = dhcp_dynamic_range(network)
   candidate = ipv4_to_i(start_ip)
+  candidate = next_free_ip(candidate, used, gateway_i, pool, network)
+  if candidate.nil? && pool
+    candidate = next_free_ip(ipv4_to_i(start_ip), used, gateway_i, nil, network)
+  end
+  candidate ? i_to_ipv4(candidate) : ""
+end
+
+def next_free_ip(candidate, used, gateway_i, pool, network)
   while candidate <= network["last_i"]
     if used[candidate] || gateway_i == candidate
       candidate += 1
     elsif pool && candidate >= pool[0] && candidate <= pool[1]
       candidate = pool[1] + 1
     else
-      break
+      return candidate
     end
   end
-  candidate <= network["last_i"] ? i_to_ipv4(candidate) : ""
+  nil
 end
 
 def default_start_ip(network)
@@ -1780,6 +1829,7 @@ def state_response
     }
   end
   rules = device_rules(config)
+  reserved_ips = dhcp_reserved_ips
   dynamic_range = dhcp_dynamic_range(active_network)
   {
     "ok" => true,
@@ -1788,7 +1838,8 @@ def state_response
     "slots" => read_slots,
     "groups" => airport_groups_from_lines(File.read(SOURCE).gsub("\r\n", "\n").split("\n", -1)),
     "start_ip" => start_ip,
-    "next_ip" => first_available_ip(rules, active_network, start_ip),
+    "next_ip" => first_available_ip(rules, active_network, start_ip, reserved_ips),
+    "reserved_ips" => reserved_ips,
     "network_cidr" => active_network["cidr"],
     "first_host" => active_network["first_host"],
     "last_host" => active_network["last_host"],
