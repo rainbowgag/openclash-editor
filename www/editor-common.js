@@ -88,6 +88,23 @@
     return groups;
   }
 
+  function ensureDefaultFrontProxyGroup(draft) {
+    draft.groups = draft.groups || [];
+    var defaultName = '节点选择代理组';
+    var names = (draft.nodes || []).map(function(node) { return String(node.name); });
+    var existing = null;
+    draft.groups.forEach(function(group) {
+      if (group && group.name === defaultName) existing = group;
+    });
+    if (!existing) {
+      existing = { name: defaultName, type: 'select', proxies: [] };
+      draft.groups.push(existing);
+    }
+    existing.type = 'select';
+    existing.proxies = names.slice();
+    return existing;
+  }
+
   function recalculateNextIp(draft) {
     var info = cidrInfo(draft.network_cidr), start = ipToInt(draft.start_ip);
     if (!info || start === null || start < info.first || start > info.last) { draft.next_ip = ''; return ''; }
@@ -219,6 +236,7 @@
     ipToInt: ipToInt, intToIp: intToIp, cidrInfo: cidrInfo,
     ruleParts: ruleParts, numberNodes: numberNodes,
     countryTag: countryTag, airportGroupName: airportGroupName, buildAirportGroups: buildAirportGroups,
+    ensureDefaultFrontProxyGroup: ensureDefaultFrontProxyGroup,
     removeNodes: removeNodes, removeRulesByIps: removeRulesByIps, esc: esc
   };
 })(window);
