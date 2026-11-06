@@ -1,5 +1,5 @@
 <%+header%>
-<link rel="stylesheet" href="<%=resource%>/openclash-editor/editor.css?v=2.6.1">
+<link rel="stylesheet" href="<%=resource%>/openclash-editor/editor.css?v=2.6.2">
 <div class="oce-shell">
   <div class="oce-hero">
     <div><h2>OpenClash 可视编辑器</h2><p>节点管理 · 所有编辑先保存在浏览器草稿中</p></div>
@@ -38,8 +38,8 @@
     <div class="oce-actions" style="margin-top:14px"><a class="btn cbi-button cbi-button-action" href="<%=luci.dispatcher.build_url('admin','services','openclash','visual-editor-rules')%>">下一步：管理规则与应用 →</a></div>
   </div>
 </div>
-<script src="<%=resource%>/openclash-editor/converter.js?v=2.6.1"></script>
-<script src="<%=resource%>/openclash-editor/editor-common.js?v=2.6.1"></script>
+<script src="<%=resource%>/openclash-editor/converter.js?v=2.6.2"></script>
+<script src="<%=resource%>/openclash-editor/editor-common.js?v=2.6.2"></script>
 <script>
 (function(){
   var E=OpenClashEditor,draft,bulkRename={prefix:'',start:1,configured:false},selectedNodes=Object.create(null);
@@ -56,7 +56,7 @@
   var subNodes=[];
   function renderSubResult(){var box=el('sub_result');if(!subNodes.length){box.style.display='none';box.innerHTML='';return}var rows=subNodes.map(function(n,idx){return '<tr><td><input class="sub-select oce-check" data-i="'+idx+'" type="checkbox" checked></td><td><strong>'+E.esc(n.name)+'</strong></td><td>'+E.esc(E.airportGroupName(E.countryTag(n.name)))+'</td><td>'+E.esc(n.type||'')+'</td><td>'+E.esc(n.server||'')+(n.port?':'+E.esc(n.port):'')+'</td></tr>'}).join('');box.style.display='';box.innerHTML='<div class="oce-actions" style="margin:8px 0"><label class="oce-check-label"><input id="sub_select_all" class="oce-check" type="checkbox" checked> 全选</label><button id="sub_import_btn" class="btn cbi-button cbi-button-action" type="button">导入选中并自动建组</button><span class="oce-muted">共 '+subNodes.length+' 个节点</span></div><table class="oce-table"><thead><tr><th style="width:56px">选择</th><th>名称</th><th>地区组</th><th>协议</th><th>服务器</th></tr></thead><tbody>'+rows+'</tbody></table>';el('sub_select_all').onchange=function(){var c=this.checked;Array.prototype.forEach.call(box.querySelectorAll('.sub-select'),function(x){x.checked=c})};el('sub_import_btn').onclick=importAirportNodes}
   function fetchSubscription(){var url=el('sub_url').value.trim(),btn=el('sub_fetch_btn');if(!url){msg('请输入订阅地址','error');return}btn.disabled=true;msg('正在拉取订阅…','warn');E.post(urls.subFetch,{url:url}).then(function(r){if(!r.ok)throw new Error(r.error+(r.details?'\n'+r.details:''));var nodes=[];if(r.format==='yaml'){nodes=r.nodes||[]}else{var out=OpenClashConverter.convert(r.raw||'','');nodes=out.nodes||[]}if(!nodes.length){subNodes=[];renderSubResult();msg('订阅中没有解析到节点','warn');return}subNodes=nodes;renderSubResult();msg('已拉取 '+nodes.length+' 个节点，勾选后导入','ok')}).catch(function(e){msg(e.message,'error')}).then(function(){btn.disabled=false})}
-  function importAirportNodes(){var checked=[];Array.prototype.forEach.call(el('sub_result').querySelectorAll('.sub-select'),function(x){if(x.checked&&subNodes[Number(x.getAttribute('data-i'))])checked.push(subNodes[Number(x.getAttribute('data-i'))])});if(!checked.length){msg('请先勾选要导入的节点','warn');return}var added=0,skipped=0;checked.forEach(function(n){if(exists(n.name)){skipped++;return}draft.nodes.push({name:String(n.name),type:String(n.type||''),server:String(n.server||''),port:n.port,in_pr:false,data:n});added++});var groups=E.buildAirportGroups(checked),byName=Object.create(null);(draft.groups||[]).forEach(function(g){if(g&&g.name)byName[g.name]=g});groups.forEach(function(g){if(byName[g.name]){var seen=Object.create(null);byName[g.name].proxies.forEach(function(x){seen[x]=true});g.proxies.forEach(function(x){if(!seen[x]){byName[g.name].proxies.push(x);seen[x]=true}})}else{byName[g.name]=g;draft.groups.push(g)}});ensureRouterProxy();subNodes=[];renderSubResult();render();var notes=['已导入 '+added+' 个机场节点'];if(skipped)notes.push('跳过同名节点 '+skipped+' 个');notes.push('已自动生成/合并前置代理组');msg(notes.join('\n'),'ok')}
+  function importAirportNodes(){var checked=[];Array.prototype.forEach.call(el('sub_result').querySelectorAll('.sub-select'),function(x){if(x.checked&&subNodes[Number(x.getAttribute('data-i'))])checked.push(subNodes[Number(x.getAttribute('data-i'))])});if(!checked.length){msg('请先勾选要导入的节点','warn');return}var added=0,skipped=0;checked.forEach(function(n){if(exists(n.name)){skipped++;return}draft.nodes.push({name:String(n.name),type:String(n.type||''),server:String(n.server||''),port:n.port,in_pr:false,data:n});added++});var groups=E.buildAirportGroups(checked),byName=Object.create(null);(draft.groups||[]).forEach(function(g){if(g&&g.name)byName[g.name]=g});groups.forEach(function(g){if(byName[g.name]){var seen=Object.create(null);byName[g.name].proxies.forEach(function(x){seen[x]=true});g.proxies.forEach(function(x){if(!seen[x]){byName[g.name].proxies.push(x);seen[x]=true}})}else{byName[g.name]=g;draft.groups.push(g)}});E.ensureDefaultFrontProxyGroup(draft);ensureRouterProxy();subNodes=[];renderSubResult();render();var notes=['已导入 '+added+' 个机场节点'];if(skipped)notes.push('跳过同名节点 '+skipped+' 个');notes.push('已自动生成/合并前置代理组');msg(notes.join('\n'),'ok')}
 
   function updateBulkRenamePreview(){var prefix=el('bulk_rename_prefix').value.trim()||'节点',start=Number(el('bulk_rename_start').value);if(!Number.isInteger(start)||start<0)start=1;el('bulk_rename_preview').textContent='命名预览：'+prefix+start+'、'+prefix+(start+1)+'、'+prefix+(start+2)+'……'}
   function openBulkRename(){el('bulk_rename_prefix').value=bulkRename.prefix;el('bulk_rename_start').value=bulkRename.start;updateBulkRenamePreview();el('bulk_rename_modal').style.display='flex';setTimeout(function(){el('bulk_rename_prefix').focus()},0)}
@@ -116,6 +116,7 @@
     draft.selected_node_names=accepted.map(function(n){return n.name});
     ensureRouterProxy();
     el('add_to_pr').checked=!hasRouterProxy();
+    E.ensureDefaultFrontProxyGroup(draft);
     render();
     var acceptedCodeCount=accepted.reduce(function(total,n){return total+(slotCodesByName[n.name]||[]).length},0);
     var importedCodeCount=acceptedCodeCount+replaceSlotRequests.length;
@@ -158,6 +159,7 @@
     draft.rules=draft.rules.map(function(r){var p=E.ruleParts(r);return p.name===old?['SRC-IP-CIDR',p.ip,name].concat(p.suffix).join(','):r});
     (draft.slots||[]).forEach(function(slot){if(slot.node===old){slot.node=name;var prefix=old+'-槽位';if(slot.name.indexOf(prefix)===0){var candidate=name+'-槽位'+slot.name.slice(prefix.length);if(!draft.slots.some(function(other){return other!==slot&&other.name===candidate}))slot.name=candidate}}});
     draft.selected_node_names=(draft.selected_node_names||[]).map(function(x){return x===old?name:x});
+    E.ensureDefaultFrontProxyGroup(draft);
     render();msg('节点已改名，关联规则和扫码槽位也已同步修改','ok');
   }
   function deleteNode(i){
@@ -175,14 +177,14 @@
       draft.rules=draft.rules.filter(function(r){return E.ruleParts(r).name!==n.name});
       draft.slots=(draft.slots||[]).filter(function(slot){return slot.node!==n.name});
     }
-    draft.nodes.splice(i,1);draft.selected_node_names=(draft.selected_node_names||[]).filter(function(x){return x!==n.name});delete selectedNodes[n.name];ensureRouterProxy();el('add_to_pr').checked=!hasRouterProxy();render();
+    draft.nodes.splice(i,1);draft.selected_node_names=(draft.selected_node_names||[]).filter(function(x){return x!==n.name});delete selectedNodes[n.name];E.ensureDefaultFrontProxyGroup(draft);ensureRouterProxy();el('add_to_pr').checked=!hasRouterProxy();render();
     msg(replacement?'节点已删除，关联规则和扫码槽位已迁移':'节点、关联规则和扫码槽位已删除','warn');
   }
   function bulkDeleteNodes(){
     var names=Object.keys(selectedNodes).filter(function(name){return selectedNodes[name]&&exists(name)});if(!names.length)return;
     var linked=draft.rules.filter(function(r){return selectedNodes[E.ruleParts(r).name]}).length,linkedSlots=(draft.slots||[]).filter(function(slot){return selectedNodes[slot.node]}).length;
     if(!confirm('确认批量删除 '+names.length+' 个节点？\n同时会删除 '+linked+' 条关联规则和 '+linkedSlots+' 个扫码槽位。'))return;
-    var result=E.removeNodes(draft,names);selectedNodes=Object.create(null);ensureRouterProxy();el('add_to_pr').checked=!hasRouterProxy();render();
+    var result=E.removeNodes(draft,names);selectedNodes=Object.create(null);E.ensureDefaultFrontProxyGroup(draft);ensureRouterProxy();el('add_to_pr').checked=!hasRouterProxy();render();
     msg('已批量删除 '+result.nodes+' 个节点、'+result.rules+' 条规则和 '+result.slots+' 个扫码槽位','warn');
   }
   function tableEvent(e){var i=Number(e.target.getAttribute('data-i'));if(e.target.classList.contains('node-select')){if(e.target.checked)selectedNodes[e.target.getAttribute('data-name')]=true;else delete selectedNodes[e.target.getAttribute('data-name')];syncNodeSelection();return}if(e.target.classList.contains('rename'))renameNode(i);if(e.target.classList.contains('delete'))deleteNode(i);if(e.target.classList.contains('node-dialer')&&e.type==='change'&&draft.nodes[i]){draft.nodes[i].data['dialer-proxy']=e.target.value||'';draft.nodes[i]._edited=true;render();return}if(e.target.classList.contains('node-pr')&&draft.nodes[i]){if(e.target.checked){draft.nodes[i].in_pr=true;draft.nodes[i]._edited=true}else{var keep=draft.nodes.some(function(n,idx){return idx!==i&&n.in_pr});if(!keep){e.target.checked=true;msg('至少需要保留一个路由器代理节点','error');return}draft.nodes[i].in_pr=false;draft.nodes[i]._edited=true}el('add_to_pr').checked=!hasRouterProxy();render()}}
@@ -190,7 +192,7 @@
   el('update_btn').onclick=function(){if(!confirm('确认在线更新插件？正式 OpenClash 配置不会被修改。'))return;this.disabled=true;E.post(urls.update,{}).then(function(r){if(!r.ok)throw new Error(r.error+(r.details?'\n'+r.details:''));alert('插件已更新到 '+r.version+'，页面将刷新。');location.reload()}).catch(function(e){msg(e.message,'error');el('update_btn').disabled=false})};
   el('reset_btn').onclick=function(){if(!confirm('确认恢复初始配置？\n这会立即备份正式配置，然后清空全部节点、路由器代理节点名称和 SRC-IP-CIDR 设备规则；其他基础配置与规则会保留。'))return;this.disabled=true;E.post(urls.reset,{}).then(function(r){if(!r.ok)throw new Error(r.error+(r.details?'\n'+r.details:''));E.clearDraft();alert('已恢复初始配置。备份：'+r.backup);location.reload()}).catch(function(e){msg(e.message,'error');el('reset_btn').disabled=false})};
   el('bulk_rename_enabled').onchange=function(){el('bulk_rename_btn').disabled=!this.checked};el('bulk_rename_btn').onclick=openBulkRename;el('bulk_rename_prefix').oninput=updateBulkRenamePreview;el('bulk_rename_start').oninput=updateBulkRenamePreview;el('bulk_rename_confirm').onclick=saveBulkRename;el('bulk_rename_cancel').onclick=closeBulkRename;el('bulk_rename_modal').onclick=function(e){if(e.target===this)closeBulkRename()};el('import_btn').onclick=importNodes;el('clear_btn').onclick=function(){el('links').value=''};el('node_search').oninput=render;el('node_search_clear').onclick=function(){el('node_search').value='';render();el('node_search').focus()};el('node_select_all').onchange=function(){var checked=this.checked;visibleNodeNames().forEach(function(name){if(checked)selectedNodes[name]=true;else delete selectedNodes[name]});render()};el('node_bulk_delete').onclick=bulkDeleteNodes;el('sub_fetch_btn').onclick=fetchSubscription;el('dialer_batch').onchange=function(){el('dialer_batch_btn').disabled=!this.value};el('dialer_batch_btn').onclick=applyDialerBatch;el('existing_body').onclick=tableEvent;el('existing_body').onchange=tableEvent;el('new_body').onclick=tableEvent;el('new_body').onchange=tableEvent;
-  E.loadDraft().then(function(d){draft=d;ensureRouterProxy();el('add_to_pr').checked=!hasRouterProxy();render();msg('已读取正式配置；运行平台 '+draft.architecture+'；当前修改仅保存在浏览器草稿','ok');checkUpdate()}).catch(function(e){msg(e.message,'error')});
+    E.loadDraft().then(function(d){draft=d;E.ensureDefaultFrontProxyGroup(draft);ensureRouterProxy();el('add_to_pr').checked=!hasRouterProxy();render();msg('已读取正式配置；运行平台 '+draft.architecture+'；当前修改仅保存在浏览器草稿','ok');checkUpdate()}).catch(function(e){msg(e.message,'error')});
 })();
 </script>
 <%+footer%>
