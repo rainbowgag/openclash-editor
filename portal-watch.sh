@@ -11,6 +11,8 @@ HOSTS_FILE="${OPENCLASH_EDITOR_HOSTS_FILE:-/etc/hosts}"
 BACKUP_DIR="${OPENCLASH_EDITOR_PORTAL_BACKUP_DIR:-/usr/share/openclash-editor/portal-backups}"
 NGINX_CONF_DIR="${OPENCLASH_EDITOR_NGINX_CONF_DIR:-/etc/nginx/conf.d}"
 NGINX_LOCATIONS="$NGINX_CONF_DIR/openclash-editor-portal.locations"
+NGINX_NCSI_CONF="$NGINX_CONF_DIR/30-ncsi.locations"
+NGINX_NCSI_BACKUP="$BACKUP_DIR/30-ncsi.locations"
 INDEX_PATH="$WEB_ROOT/index.html"
 INDEX_BACKUP="$BACKUP_DIR/index.html.bind-lan-original"
 UHTTPD_INDEX_BACKUP="$BACKUP_DIR/uhttpd-index-page-original"
@@ -160,6 +162,10 @@ EOF
   done
 
   if [ -d "$NGINX_CONF_DIR" ] && [ -x /etc/init.d/nginx ]; then
+    if [ -f "$NGINX_NCSI_CONF" ]; then
+      [ -f "$NGINX_NCSI_BACKUP" ] || cp -p "$NGINX_NCSI_CONF" "$NGINX_NCSI_BACKUP"
+      rm -f "$NGINX_NCSI_CONF"
+    fi
     cat > "$NGINX_LOCATIONS" <<EOF
 # $PROBE_MARKER
 if (\$host = $SHORT_HOST) { return 302 http://$lan_ip/cgi-bin/luci/oec; }
@@ -178,12 +184,17 @@ EOF
       /etc/init.d/nginx reload >/dev/null 2>&1 || true
     else
       rm -f "$NGINX_LOCATIONS"
+      [ ! -f "$NGINX_NCSI_BACKUP" ] || cp -p "$NGINX_NCSI_BACKUP" "$NGINX_NCSI_CONF"
     fi
   fi
 }
 
 restore_probe_files() {
   rm -f "$NGINX_LOCATIONS"
+  if [ -f "$NGINX_NCSI_BACKUP" ]; then
+    mkdir -p "$(dirname "$NGINX_NCSI_CONF")"
+    mv "$NGINX_NCSI_BACKUP" "$NGINX_NCSI_CONF"
+  fi
   for relative in $PROBE_PATHS; do
     path="$WEB_ROOT/$relative"
     backup="$BACKUP_DIR/$relative"
